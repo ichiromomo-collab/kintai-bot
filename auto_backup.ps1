@@ -1,5 +1,5 @@
 # === 設定 ===
-$projectPath = "C:\Users\komes\gas-backup"  # ローカルのGASクローンフォルダ
+$projectPath = "C:\Users\komes\kintai-bot"  # ローカルのGASクローンフォルダ
 $logFile     = "$projectPath\backup_log.txt"
 
 # === ループ開始 ===
