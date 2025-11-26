@@ -15,7 +15,7 @@ while ($true) {
     git commit -m "Auto backup $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" --allow-empty
     git push
 
-    Start-Sleep -Seconds 60
+    Start-Sleep -Seconds 180
 }
 while ($true) {
   Write-Host "Pulling GAS updates... " -ForegroundColor Cyan
