@@ -20,5 +20,5 @@ while ($true) {
 while ($true) {
   Write-Host "Pulling GAS updates... " -ForegroundColor Cyan
   clasp pull
-  Start-Sleep -Seconds 60   # ←間隔 60秒にしてるけど好きに変えてOK
+  Start-Sleep -Seconds 180   # ←間隔 60秒にしてるけど好きに変えてOK
 }
