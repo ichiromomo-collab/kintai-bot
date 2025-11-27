@@ -361,11 +361,12 @@ function exportMonthlySheets() {
 
   if (data.length === 0) return;
 
-  // 今月を抽出
-  const today = new Date();
-  const year  = today.getFullYear();
-  const month = today.getMonth() + 1;
-  const ymStr = `${year}/${month.toString().padStart(2,"0")}`;
+  // --- 今月データの抽出（Date型対応）---
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+
+  if (y !== year || m !== month) return;
+
 
   // スタッフごとにデータまとめる
   const map = new Map();
