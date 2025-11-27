@@ -197,88 +197,147 @@ function testAuth() {
   Logger.log("✅ 認証成功: " + sheet.getName());
 }
 
-// ===== 勤怠記録へ転記（労働時間＋時給計算つき）=====
+// ===== 勤怠記録へ転記（出勤丸め・休憩優先・割増計算・分単位の正確計算）=====
 function updateAttendanceSheet() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const logSheet = ss.getSheetByName("受信ログ");
     const attendanceSheet = ss.getSheetByName("勤怠記録");
-    const staffSheet = ss.getSheetByName("スタッフマスタ"); // ← ここ追加！
+    const staffSheet = ss.getSheetByName("スタッフマスタ");
 
     if (!logSheet || !attendanceSheet || !staffSheet) {
       Logger.log("⚠ シートが見つかりません");
       return;
     }
 
-    // --- スタッフマスタをマップ化（名前 → 時給）---
+    // --- スタッフマスタをマップ化（名前 → {時給, 出勤丸め時間}）---
     const staffData = staffSheet.getDataRange().getValues();
     staffData.shift(); // ヘッダー除去
+
     const staffMap = new Map();
-    staffData.forEach(([name, wage]) => {
-      if (name && wage) staffMap.set(String(name).trim(), Number(wage));
+    staffData.forEach(([name, wage, start]) => {
+      if (name && wage) {
+        staffMap.set(String(name).trim(), {
+          wage: Number(wage),
+          start: start ? Utilities.formatDate(start, "Asia/Tokyo", "HH:mm") : ""
+        });
+      }
     });
 
-    // --- 受信ログの読み込み ---
+    // --- 受信ログ ---
     const logs = logSheet.getDataRange().getValues();
     logs.shift();
-    const attendanceMap = new Map();
+
+    const map = new Map(); // key: "日付_名前" → {in,out,rest}
 
     logs.forEach(row => {
-      const [timestamp, name, action, date, time] = row;
+      const [timestamp, name, action, date, time, restInput] = row;
       if (!name || !date || !time) return;
 
       const key = `${date}_${name}`;
-      const record = attendanceMap.get(key) || { date, name, in: "", out: "" };
+      const obj = map.get(key) || { date, name, in: "", out: "", rest: "" };
 
-      if (action === "punch_in") record.in = time;
-      if (action === "punch_out") record.out = time;
+      if (action === "punch_in") obj.in = time;
+      if (action === "punch_out") obj.out = time;
 
-      attendanceMap.set(key, record);
+      // ★ 休憩時間（優先）
+      if (restInput) obj.rest = restInput;
+
+      map.set(key, obj);
     });
 
-   // --- 勤怠記録クリア＆ヘッダー再作成 ---
-attendanceSheet.clearContents();
-attendanceSheet.appendRow(["日付", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩時間"]);
+    // --- 勤怠記録の初期化 ---
+    attendanceSheet.clearContents();
+    attendanceSheet.appendRow(["日付", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩時間"]);
 
-// --- データ書き込み（ヘッダと列数7つ揃える）---
-const rows = [];
-attendanceMap.forEach(r => rows.push([r.date, r.name, r.in, r.out, "", "", ""]));
-if (rows.length) attendanceSheet.getRange(2, 1, rows.length, 7).setValues(rows);
+    const rows = [];
 
-// === 行数チェック ===
-const lastRow = attendanceSheet.getLastRow();
-if (lastRow < 2) {
-  Logger.log("ℹ 明細0件。終了。");
-  return;
-}
+    map.forEach(rec => {
+      const staff = staffMap.get(String(rec.name).trim());
+      if (!staff) return;
 
-const n = lastRow - 1;
+      let start = rec.in;
+      let end = rec.out;
 
-// 💡 G列にデフォルト休憩時間（1:00）を自動挿入
-const restRange = attendanceSheet.getRange(2, 7, n, 1);
-const restValues = restRange.getValues().map(r => [r[0] || "1:00"]);
-restRange.setValues(restValues);
-restRange.setNumberFormat("[h]:mm");
+      // --- 出勤丸め ---
+      if (staff.start) {
+        const scheduled = staff.start;      // 例 "08:30"
+        const pressed = rec.in;             // 押した時刻 "08:17" など
 
-// 💡 E列：労働時間（出勤-退勤-休憩）
-attendanceSheet.getRange(2, 5, n, 1).setFormulaR1C1(
-  '=IF(AND(RC[-2]<>"",RC[-1]<>""),(RC[-1]-RC[-2]-RC[2]),"")'
-);
+        if (pressed) {
+          if (pressed < scheduled) start = scheduled; // 早すぎ → 丸め上げ
+          else start = pressed;                       // 遅刻 → そのまま
+        }
+      }
 
-// 💡 F列：勤務金額
-attendanceSheet.getRange(2, 6, n, 1).setFormulaR1C1(
-  '=IF(RC[-1]="","",RC[-1]*24*VLOOKUP(RC[-4],\'スタッフマスタ\'!C1:C2,2,false))'
-);
+      // --- 退勤はそのまま ---
+      if (!end) end = "";
 
-// 💡 表示形式
-attendanceSheet.getRange(2, 5, n, 1).setNumberFormat("[h]:mm"); // 労働時間
-attendanceSheet.getRange(2, 6, n, 1).setNumberFormat("¥#,##0"); // 金額
+      // --- 休憩 ---
+      let restStr = rec.rest ? rec.rest : "1:00"; // 受信ログ優先・なければデフォルト
 
-Logger.log("✅ 勤怠記録＋時給計算 更新OK（休憩時間デフォルト1h対応）");
+      // === 労働時間（分単位の正確計算） ===
+      let workMinutes = 0;
+
+      if (start && end) {
+        const s = toMinutes(start);
+        const e = toMinutes(end);
+        const r = toMinutes(restStr);
+        workMinutes = Math.max(0, (e - s - r));
+      }
+
+      // === 割増計算 ===
+      const normalMinutes = Math.min(workMinutes, 480); // 8時間まで
+      const overtimeMinutes = Math.max(0, workMinutes - 480);
+
+      const wage = staff.wage;
+      const money =
+        (normalMinutes / 60 * wage) +
+        (overtimeMinutes / 60 * wage * 1.25);
+
+      rows.push([
+        rec.date,
+        rec.name,
+        start,
+        end,
+        minutesToHHMM(workMinutes),
+        money,
+        restStr
+      ]);
+    });
+
+    if (rows.length)
+      attendanceSheet.getRange(2, 1, rows.length, 7).setValues(rows);
+
+    // 表示形式
+    attendanceSheet.getRange(2, 5, rows.length, 1).setNumberFormat("[h]:mm");
+    attendanceSheet.getRange(2, 6, rows.length, 1).setNumberFormat("¥#,##0");
+    attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("[h]:mm");
+
+    Logger.log("✅ 完全版勤怠システム：更新OK");
 
   } catch (err) {
     Logger.log("💥 updateAttendanceSheet ERROR: " + err);
   }
 }
+
+
+// === 時刻を「分」に変換 ===
+function toMinutes(str) {
+  try {
+    const [h, m] = str.split(":").map(Number);
+    return h * 60 + m;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// === 分 → "H:MM" 表示へ ===
+function minutesToHHMM(min) {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}:${m.toString().padStart(2, "0")}`;
+}
+
 
 
