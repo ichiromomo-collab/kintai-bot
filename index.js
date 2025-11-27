@@ -252,21 +252,25 @@ function updateAttendanceSheet() {
 
     const rows = [];
 
-    map.forEach(rec => {
+     map.forEach(rec => {
       const staff = staffMap.get(String(rec.name).trim());
       if (!staff) return;
 
-      let start = rec.in;
-      let end = rec.out;
+      // ===== 出勤・退勤・休憩を「分」に変換 =====
+      let startMinutes = null;
+      let endMinutes   = null;
 
-      // --- 出勤丸め ---
-      if (staff.start) {
-        const scheduled = staff.start;      // 例 "08:30"
-        const pressed = rec.in;             // 押した時刻 "08:17" など
+      // 出勤（丸めロジック）
+      if (rec.in) {
+        const pressedMin = toMinutes(rec.in);              // 実際押した時間
+        const scheduled  = staff.startMinutes;             // マスタ出勤時間（分）
 
-        if (pressed) {
-          if (pressed < scheduled) start = scheduled; // 早すぎ → 丸め上げ
-          else start = pressed;                       // 遅刻 → そのまま
+        if (scheduled != null && pressedMin < scheduled) {
+          // 予定より前 → 丸めて scheduled
+          startMinutes = scheduled;
+        } else {
+          // 予定以降 → 押した時間そのまま
+          startMinutes = pressedMin;
         }
       }
 
