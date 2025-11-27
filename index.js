@@ -210,21 +210,30 @@ function updateAttendanceSheet() {
       return;
     }
 
-    // --- スタッフマスタ（名前 → {時給, 出勤丸め分}）---
-    const staffData = staffSheet.getDataRange().getValues();
-    staffData.shift();
-    const staffMap = new Map();
+// --- スタッフマスタをマップ化（ID → {漢字名, 時給, 丸め基準}）---
+const staffData = staffSheet.getDataRange().getValues();
+staffData.shift(); // ヘッダー除去
 
-    staffData.forEach(([name, wage, start]) => {
-      if (!name || !wage) return;
-      const startStr = start
-        ? Utilities.formatDate(start, "Asia/Tokyo", "HH:mm")
-        : "";
-      staffMap.set(String(name).trim(), {
-        wage: Number(wage),
-        startMinutes: startStr ? toMinutes(startStr) : null,
-      });
-    });
+const staffMap = new Map();
+
+staffData.forEach(([id, wage, startTime, fullName]) => {
+  if (!id) return;
+
+  // startTime が Date型なら分へ変換
+  let startMinutes = null;
+  if (startTime instanceof Date) {
+    startMinutes = startTime.getHours() * 60 + startTime.getMinutes();
+  } else if (typeof startTime === "string" && startTime.includes(":")) {
+    startMinutes = toMinutes(startTime);
+  }
+
+  staffMap.set(String(id).trim(), {
+    id: String(id).trim(),          // そのままID
+    name: fullName || id,           // 漢字名があれば使う
+    wage: Number(wage) || 0,        // 時給
+    startMinutes: startMinutes      // 丸め開始時刻（分）
+  });
+});
 
     // --- 受信ログ（同じ日付＋名前で集約）---
     const logs = logSheet.getDataRange().getValues();
