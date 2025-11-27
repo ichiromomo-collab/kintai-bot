@@ -361,26 +361,29 @@ function exportMonthlySheets() {
 
   if (data.length === 0) return;
 
+  // 今月を抽出
+  const today = new Date();
+  const year  = today.getFullYear();
+  const month = today.getMonth() + 1;
+  const ymStr = `${year}/${month.toString().padStart(2,"0")}`;
+
+  // スタッフごとにデータまとめる
+  const map = new Map();
+
+  data.forEach(row => {
+  const [date, name, start, end, work, money, rest] = row;
+  if (!name || !date) return;
+
   // --- 今月データの抽出（Date型対応）---
   const y = date.getFullYear();
   const m = date.getMonth() + 1;
 
   if (y !== year || m !== month) return;
 
-
-  // スタッフごとにデータまとめる
-  const map = new Map();
-
-  data.forEach(row => {
-    const [date, name, start, end, work, money, rest] = row;
-    if (!name || !date) return;
-
-    // この月だけ抽出
-    if (!String(date).startsWith(ymStr)) return;
-
-    if (!map.has(name)) map.set(name, []);
-    map.get(name).push(row);
+  if (!map.has(name)) map.set(name, []);
+  map.get(name).push(row);
   });
+
 
   // 各スタッフのシート作成
   map.forEach((rows, name) => {
