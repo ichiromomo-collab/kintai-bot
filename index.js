@@ -197,7 +197,7 @@ function testAuth() {
   Logger.log("✅ 認証成功: " + sheet.getName());
 }
 
-// ===== 勤怠記録へ転記（出勤丸め・休憩優先・割増計算・分単位計算）=====
+// ===== 勤怠記録へ転記（出勤丸め・休憩優先・分単位計算・漢字名対応）=====
 function updateAttendanceSheet() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -206,113 +206,104 @@ function updateAttendanceSheet() {
     const staffSheet = ss.getSheetByName("スタッフマスタ");
 
     if (!logSheet || !attendanceSheet || !staffSheet) {
-      Logger.log("⚠ シートが見つかりません");
+      Logger.log("⚠ シートが見つからない");
       return;
     }
 
-// --- スタッフマスタをマップ化（ID → {漢字名, 時給, 丸め基準}）---
-const staffData = staffSheet.getDataRange().getValues();
-staffData.shift(); // ヘッダー除去
+    // ===== スタッフマスタ → Map(ID → {漢字名, 時給, 丸め時刻}) =====
+    const staffData = staffSheet.getDataRange().getValues();
+    staffData.shift(); // ヘッダー除去
 
-const staffMap = new Map();
+    const staffMap = new Map();
 
-staffData.forEach(([id, wage, startTime, fullName]) => {
-  if (!id) return;
+    staffData.forEach(([id, wage, startTime, fullName]) => {
+      if (!id) return;
 
-  // startTime が Date型なら分へ変換
-  let startMinutes = null;
-  if (startTime instanceof Date) {
-    startMinutes = startTime.getHours() * 60 + startTime.getMinutes();
-  } else if (typeof startTime === "string" && startTime.includes(":")) {
-    startMinutes = toMinutes(startTime);
-  }
+      let startMinutes = null;
+      if (startTime instanceof Date) {
+        startMinutes = startTime.getHours() * 60 + startTime.getMinutes();
+      } else if (typeof startTime === "string" && startTime.includes(":")) {
+        startMinutes = toMinutes(startTime);
+      }
 
-  staffMap.set(String(id).trim(), {
-    id: String(id).trim(),          // そのままID
-    name: fullName || id,           // 漢字名があれば使う
-    wage: Number(wage) || 0,        // 時給
-    startMinutes: startMinutes      // 丸め開始時刻（分）
-  });
-});
+      staffMap.set(String(id).trim(), {
+        id: String(id).trim(),
+        name: fullName || id,
+        wage: Number(wage) || 0,
+        startMinutes: startMinutes
+      });
+    });
 
-    // --- 受信ログ（同じ日付＋名前で集約）---
+    // ===== 受信ログを集約（同一日付＋同一ID）=====
     const logs = logSheet.getDataRange().getValues();
     logs.shift();
 
-    const map = new Map(); // key: "日付_名前" → {date,name,in,out,rest}
+    const map = new Map();
 
     logs.forEach(row => {
       const [ts, name, action, date, time, rest] = row;
       if (!name || !date || !time) return;
 
       const key = `${date}_${name}`;
-      const obj = map.get(key) || { date, name, in: "", out: "", rest: "" };
+      const obj = map.get(key) || { date, id: name, in: "", out: "", rest: "" };
 
       if (action === "punch_in") obj.in = time;
       if (action === "punch_out") obj.out = time;
-      if (rest) obj.rest = rest; // 受信ログの休憩があれば優先
+      if (rest) obj.rest = rest;
 
       map.set(key, obj);
     });
 
-    // --- 勤怠記録初期化 ---
+    // ===== 勤怠記録 初期化 =====
     attendanceSheet.clearContents();
-    attendanceSheet.appendRow(["日付","名前","出勤","退勤","労働時間","勤務金額","休憩時間"]);
+    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩"]);
 
     const rows = [];
 
     map.forEach(rec => {
-      const staff = staffMap.get(String(rec.name).trim());
+      const staff = staffMap.get(String(rec.id).trim());
       if (!staff) return;
 
-      // ===== 出勤・退勤・休憩を「分」に変換 =====
-      let startMinutes = null;
-      let endMinutes   = null;
+      // ==== 出勤・退勤を分に変換 ====
+      const pressedStart = rec.in ? toMinutes(rec.in) : null;
+      const pressedEnd   = rec.out ? toMinutes(rec.out) : null;
 
-      // 出勤（丸めロジック）
-      if (rec.in) {
-        const pressedMin = toMinutes(rec.in);              // 実際押した時間
-        const scheduled  = staff.startMinutes;             // マスタ出勤時間（分）
-
-        if (scheduled != null && pressedMin < scheduled) {
-          // 予定より前 → 丸めて scheduled
-          startMinutes = scheduled;
-        } else {
-          // 予定以降 → 押した時間そのまま
-          startMinutes = pressedMin;
+      // ==== 出勤丸め ====
+      let startMinutes = pressedStart;
+      if (pressedStart != null && staff.startMinutes != null) {
+        if (pressedStart < staff.startMinutes) {
+          startMinutes = staff.startMinutes;
         }
       }
 
-      // 退勤（そのまま）
-      if (rec.out) {
-        endMinutes = toMinutes(rec.out);
-      }
+      const endMinutes = pressedEnd;
 
-      // 休憩
-      const restStr = rec.rest ? rec.rest : "1:00"; // 受信ログ優先、なければ1:00
+      // ==== 休憩 ====
+      const restStr     = rec.rest ? rec.rest : "1:00";
       const restMinutes = toMinutes(restStr);
 
-      // ===== 労働時間（分単位） =====
+      // ==== 労働時間 ====
       let workMinutes = 0;
       if (startMinutes != null && endMinutes != null) {
         workMinutes = Math.max(0, endMinutes - startMinutes - restMinutes);
       }
 
-      // ===== 割増計算（8h超は1.25倍） =====
-      const normalMinutes   = Math.min(workMinutes, 480);
-      const overtimeMinutes = Math.max(0, workMinutes - 480);
+      // ==== 金額 ====
+      const normal = Math.min(workMinutes, 480);
+      const over   = Math.max(0, workMinutes - 480);
 
       const money =
-        (normalMinutes / 60 * staff.wage) +
-        (overtimeMinutes / 60 * staff.wage * 1.25);
+        (normal / 60 * staff.wage) +
+        (over / 60 * staff.wage * 1.25);
 
-      // ===== 出力用の表示文字列 =====
+      // ==== 表示 ====
       const startStr = startMinutes != null ? minutesToHHMM(startMinutes) : "";
       const endStr   = endMinutes   != null ? minutesToHHMM(endMinutes)   : "";
 
       rows.push([
         rec.date,
-        rec.name,
+        staff.id,
+        staff.name,       // ← 漢字名（ここが今回の重要点）
         startStr,
         endStr,
         minutesToHHMM(workMinutes),
@@ -321,14 +312,14 @@ staffData.forEach(([id, wage, startTime, fullName]) => {
       ]);
     });
 
+    // ===== 出力 =====
     if (rows.length) {
-      attendanceSheet.getRange(2, 1, rows.length, 7).setValues(rows);
-      attendanceSheet.getRange(2, 5, rows.length, 1).setNumberFormat("[h]:mm"); // 労働時間
-      attendanceSheet.getRange(2, 6, rows.length, 1).setNumberFormat("¥#,##0"); // 金額
-      attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("[h]:mm"); // 休憩
+      attendanceSheet.getRange(2,1,rows.length,8).setValues(rows);
+      attendanceSheet.getRange(2,6,rows.length,1).setNumberFormat("[h]:mm");
+      attendanceSheet.getRange(2,7,rows.length,1).setNumberFormat("¥#,##0");
     }
 
-    Logger.log("✅ 勤怠記録 更新OK（丸めロジック修正版）");
+    Logger.log("✅ 勤怠記録 更新OK（名前・丸め対応）");
 
   } catch (err) {
     Logger.log("💥 updateAttendanceSheet ERROR: " + err);
@@ -336,95 +327,72 @@ staffData.forEach(([id, wage, startTime, fullName]) => {
 }
 
 
-
-// === 時刻を「分」に変換 ===
+// ====== 分変換 utilities ======
 function toMinutes(v) {
   try {
     if (v instanceof Date) {
       return v.getHours() * 60 + v.getMinutes();
     }
     if (typeof v === "string") {
-      const [h, m] = v.split(":").map(Number);
-      return h * 60 + m;
+      const [h,m] = v.split(":").map(Number);
+      return h*60 + m;
     }
     return 0;
-  } catch (e) {
-    return 0;
-  }
+  } catch(e) { return 0; }
 }
 
-// === 分 → "H:MM" 表示へ ===
 function minutesToHHMM(min) {
-  const h = Math.floor(min / 60);
+  const h = Math.floor(min/60);
   const m = min % 60;
-  return `${h}:${m.toString().padStart(2, "0")}`;
+  return `${h}:${m.toString().padStart(2,"0")}`;
 }
 
-// ===== 月末処理：スタッフごとに個人シートを生成 =====
+
+// ===== 月末個人シート（漢字名で出力）=====
 function exportMonthlySheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const attendance = ss.getSheetByName("勤怠記録");
 
   const data = attendance.getDataRange().getValues();
-  data.shift(); // ヘッダー除去
+  data.shift(); // header
 
-  if (data.length === 0) return;
-
-  // 今月を抽出
   const today = new Date();
-  const year  = today.getFullYear();
-  const month = today.getMonth() + 1;
-  const ymStr = `${year}/${month.toString().padStart(2,"0")}`;
+  const y = today.getFullYear();
+  const m = today.getMonth() + 1;
 
-  // スタッフごとにデータまとめる
+  // スタッフごとにまとめ
   const map = new Map();
 
-  data.forEach(row => {
-  const [date, name, start, end, work, money, rest] = row;
-  if (!name || !date) return;
+  data.forEach(r => {
+    const [date, id, name] = r;
+    if (!date) return;
 
-  // --- 今月データの抽出（Date型対応）---
-  const y = date.getFullYear();
-  const m = date.getMonth() + 1;
+    if (date.getFullYear() !== y || date.getMonth()+1 !== m) return;
 
-  if (y !== year || m !== month) return;
-
-  if (!map.has(name)) map.set(name, []);
-  map.get(name).push(row);
+    if (!map.has(id)) map.set(id, { name, rows: [] });
+    map.get(id).rows.push(r);
   });
 
+  // 出力
+  map.forEach((obj, id) => {
+    const sheetName = `${obj.name}_${y}${String(m).padStart(2,"0")}`;
 
-  // 各スタッフのシート作成
-  map.forEach((rows, name) => {
-
-    const sheetName = `${name}_${year}${String(month).padStart(2,"0")}`;
-
-    // 既存なら削除して作り直す
     const old = ss.getSheetByName(sheetName);
     if (old) ss.deleteSheet(old);
 
-    const newSheet = ss.insertSheet(sheetName);
+    const sh = ss.insertSheet(sheetName);
+    sh.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩"]);
+    sh.getRange(2,1,obj.rows.length,8).setValues(obj.rows);
 
-    // ヘッダー
-    newSheet.appendRow(["日付","名前","出勤","退勤","労働時間","勤務金額","休憩時間"]);
-    
-    // 本文
-    newSheet.getRange(2,1,rows.length,7).setValues(rows);
+    const total = obj.rows.length + 3;
+    sh.getRange(total,4).setValue("【合計】");
+    sh.getRange(total,6).setFormula(`=SUM(F2:F${obj.rows.length+1})`);
+    sh.getRange(total,7).setFormula(`=SUM(G2:G${obj.rows.length+1})`);
 
-    // 合計行
-    const totalRow = rows.length + 3;
-    newSheet.getRange(totalRow, 4).setValue("【合計】");
-    newSheet.getRange(totalRow, 5).setFormula(`=SUM(E2:E${rows.length+1})`);
-    newSheet.getRange(totalRow, 6).setFormula(`=SUM(F2:F${rows.length+1})`);
-
-    // フォーマット
-    newSheet.getRange(2,5,rows.length,1).setNumberFormat("[h]:mm");
-    newSheet.getRange(2,6,rows.length,1).setNumberFormat("¥#,##0");
-    newSheet.getRange(totalRow,5).setNumberFormat("[h]:mm");
-    newSheet.getRange(totalRow,6).setNumberFormat("¥#,##0");
+    sh.getRange(2,6,obj.rows.length,1).setNumberFormat("[h]:mm");
+    sh.getRange(2,7,obj.rows.length,1).setNumberFormat("¥#,##0");
   });
 
-  Logger.log("✅ 個人別月次シートの出力完了");
+  Logger.log("✅ 個人シート（漢字名） 完成");
 }
-
 
