@@ -276,15 +276,22 @@ function updateAttendanceSheet() {
       // --- 休憩 ---
       let restStr = rec.rest ? rec.rest : "1:00"; // 受信ログ優先・なければデフォルト
 
-      // === 労働時間（分単位の正確計算） ===
-      let workMinutes = 0;
+     // === 時刻を「分」に変換（Date型にも対応） ===
+function toMinutes(v) {
+  try {
+    if (v instanceof Date) {
+      return v.getHours() * 60 + v.getMinutes();
+    }
+    if (typeof v === "string") {
+      const [h, m] = v.split(":").map(Number);
+      return h * 60 + m;
+    }
+    return 0;
+  } catch (e) {
+    return 0;
+  }
+}
 
-      if (start && end) {
-        const s = toMinutes(start);
-        const e = toMinutes(end);
-        const r = toMinutes(restStr);
-        workMinutes = Math.max(0, (e - s - r));
-      }
 
       // === 割増計算 ===
       const normalMinutes = Math.min(workMinutes, 480); // 8時間まで
