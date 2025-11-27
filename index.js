@@ -351,5 +351,67 @@ function minutesToHHMM(min) {
   return `${h}:${m.toString().padStart(2, "0")}`;
 }
 
+// ===== 月末処理：スタッフごとに個人シートを生成 =====
+function exportMonthlySheets() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const attendance = ss.getSheetByName("勤怠記録");
+
+  const data = attendance.getDataRange().getValues();
+  data.shift(); // ヘッダー除去
+
+  if (data.length === 0) return;
+
+  // 今月を抽出
+  const today = new Date();
+  const year  = today.getFullYear();
+  const month = today.getMonth() + 1;
+  const ymStr = `${year}/${month.toString().padStart(2,"0")}`;
+
+  // スタッフごとにデータまとめる
+  const map = new Map();
+
+  data.forEach(row => {
+    const [date, name, start, end, work, money, rest] = row;
+    if (!name || !date) return;
+
+    // この月だけ抽出
+    if (!String(date).startsWith(ymStr)) return;
+
+    if (!map.has(name)) map.set(name, []);
+    map.get(name).push(row);
+  });
+
+  // 各スタッフのシート作成
+  map.forEach((rows, name) => {
+
+    const sheetName = `${name}_${year}${String(month).padStart(2,"0")}`;
+
+    // 既存なら削除して作り直す
+    const old = ss.getSheetByName(sheetName);
+    if (old) ss.deleteSheet(old);
+
+    const newSheet = ss.insertSheet(sheetName);
+
+    // ヘッダー
+    newSheet.appendRow(["日付","名前","出勤","退勤","労働時間","勤務金額","休憩時間"]);
+    
+    // 本文
+    newSheet.getRange(2,1,rows.length,7).setValues(rows);
+
+    // 合計行
+    const totalRow = rows.length + 3;
+    newSheet.getRange(totalRow, 4).setValue("【合計】");
+    newSheet.getRange(totalRow, 5).setFormula(`=SUM(E2:E${rows.length+1})`);
+    newSheet.getRange(totalRow, 6).setFormula(`=SUM(F2:F${rows.length+1})`);
+
+    // フォーマット
+    newSheet.getRange(2,5,rows.length,1).setNumberFormat("[h]:mm");
+    newSheet.getRange(2,6,rows.length,1).setNumberFormat("¥#,##0");
+    newSheet.getRange(totalRow,5).setNumberFormat("[h]:mm");
+    newSheet.getRange(totalRow,6).setNumberFormat("¥#,##0");
+  });
+
+  Logger.log("✅ 個人別月次シートの出力完了");
+}
 
 
