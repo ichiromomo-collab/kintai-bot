@@ -1,0 +1,168 @@
+/** 設定 */
+// キャッシュキーを短くする（ハッシュ化）
+function _makeKey(obj) {
+  return Utilities.base64Encode(
+    Utilities.computeDigest(
+      Utilities.DigestAlgorithm.MD5,
+      JSON.stringify(obj)
+    )
+  );
+}
+
+const API_KEY = 'AIzaSyAje88tpPQAvb287rR1r5W0SHBxpglHAmg';  // ←取得したキーを貼る
+const REGION = 'jp';
+const UNITS = 'metric';
+
+/** 住所レンジを一次元化して空欄やスペースを除去 */
+function _flattenStops(range) {
+  if (!range) return [];
+  const arr = (Array.isArray(range) ? range.flat() : [range]);
+  return arr
+    .map(x => (x || '').toString().trim())  // 空欄やnullを文字列化してtrim
+    .filter(x => x !== '');                 // 空文字を除外
+}
+
+/**
+ * =ROUTE_KM(出発, 中継レンジ, 到着, 最適化TRUE/FALSE)
+ * 例: =ROUTE_KM($C2, $D2:$F2, $G2, TRUE)
+ */
+function ROUTE_KM(origin, stopsRange, destination, optimize) {
+  origin = (origin || '').toString().trim();
+  destination = (destination || '').toString().trim();
+  const stops = _flattenStops(stopsRange);
+  if (!origin || !destination) return '';
+
+  const cacheKey = 'KM:' + _makeKey({origin, stops, destination, optimize});
+  const cache = CacheService.getDocumentCache();
+  const cached = cache.get(cacheKey);
+  if (cached) return Number(cached);
+
+  const wpRaw = stops.length ? ((optimize ? 'optimize:true|' : '') + stops.join('|')) : '';
+　const waypoints= wpRaw ? encodeURIComponent(wpRaw) : '';
+
+
+  const url = 'https://maps.googleapis.com/maps/api/directions/json?' + [
+    'origin=' + encodeURIComponent(origin),
+    'destination=' + encodeURIComponent(destination),
+    waypoints ? ('waypoints=' + waypoints) : '',
+    'region=' + REGION,
+    'units=' + UNITS,
+    'key=' + API_KEY
+  ].filter(Boolean).join('&');
+
+  const res = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
+  const data = JSON.parse(res.getContentText());
+
+  if (data.status !== 'OK' || !data.routes?.length) {
+    throw new Error('Directions API error: ' + (data.status || 'UNKNOWN'));
+  }
+
+  const legs = data.routes[0].legs || [];
+  const meters = legs.reduce((sum, leg) => sum + (leg.distance?.value || 0), 0);
+  const km = meters / 1000;
+
+  cache.put(cacheKey, String(km), 60 * 60 * 10); // 10時間キャッシュ
+  return km;
+}
+
+/** クリック用の地図URL（並びは固定） */
+// 住所 → Place ID（短くて確実なIDに変換）
+// Geocoding API を使います。6時間キャッシュ。
+function _toPlaceId_(addr) {
+  addr = (addr || '').toString().trim();
+  if (!addr) return '';
+
+  const cache = CacheService.getDocumentCache();
+  const key = 'pid:' + addr;
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const url = 'https://maps.googleapis.com/maps/api/geocode/json?' +
+              'address=' + encodeURIComponent(addr) +
+              '&region=jp&key=' + API_KEY;
+
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  const data = JSON.parse(res.getContentText());
+  if (data.status !== 'OK' || !data.results || !data.results.length) return '';
+
+  const pid = data.results[0].place_id || '';
+  if (pid) cache.put(key, pid, 21600); // 6時間
+  return pid;
+}
+
+
+// 経由地を塊に分割して複数リンクを返す（横方向にスピル）
+function ROUTE_URL_SPLIT(origin, stopsRange, destination, optimize, chunkSize) {
+  const size = Math.max(1, Number(chunkSize)||10); // 1リンクあたりの経由地数（デフォ10）
+  const o = _toPlaceId_(origin);
+  const d = _toPlaceId_(destination);
+  const allStops = _flattenStops(stopsRange).map(_toPlaceId_).filter(x=>x);
+  if (!o || !d) return [['']];
+
+  const links = [];
+  for (let i=0; i<allStops.length; i+=size) {
+    const chunk = allStops.slice(i, i+size);
+    const wpRaw = chunk.length ? ((optimize ? 'optimize:true|' : '') + chunk.map(s=>'place_id:'+s).join('|')) : '';
+    let url = 'https://www.google.com/maps/dir/?api=1';
+    url += '&origin=' + encodeURIComponent('place_id:'+o);
+    url += '&destination=' + encodeURIComponent('place_id:'+d);
+    if (wpRaw) url += '&waypoints=' + encodeURIComponent(wpRaw);
+    url += '&travelmode=driving';
+    links.push(url);
+  }
+  // 横1行でスピル
+  return [links];
+}
+// 住所 → {lat,lng, place_id} を返す（Geocoding API）。6時間キャッシュ。
+function _geocode_(addr) {
+  addr = (addr || '').toString().trim();
+  if (!addr) return null;
+
+  const cache = CacheService.getDocumentCache();
+  const key = 'gc:' + addr;
+  const hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+
+  const url = 'https://maps.googleapis.com/maps/api/geocode/json?' +
+              'address=' + encodeURIComponent(addr) +
+              '&region=jp&key=' + API_KEY;
+
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  const data = JSON.parse(res.getContentText());
+  if (data.status !== 'OK' || !data.results || !data.results.length) return null;
+
+  const r = data.results[0];
+  const out = {
+    lat: r.geometry.location.lat,
+    lng: r.geometry.location.lng,
+    place_id: r.place_id || ''
+  };
+  cache.put(key, JSON.stringify(out), 21600); // 6時間
+  return out;
+}
+
+// lat,lng で Google マップのルートURLを作る（短くて安定）
+function ROUTE_URL_LATLNG(origin, stopsRange, destination, optimize) {
+  const o = _geocode_(origin);
+  const d = _geocode_(destination);
+  const stops = _flattenStops(stopsRange)
+                 .map(_geocode_)
+                 .filter(x => x);
+
+  if (!o || !d) return '';
+
+  const fmt = p => p.lat + ',' + p.lng;
+  const wpRaw = stops.length
+    ? ((optimize ? 'optimize:true|' : '') + stops.map(fmt).join('|'))
+    : '';
+
+  let url = 'https://www.google.com/maps/dir/?api=1';
+  url += '&origin=' + encodeURIComponent(fmt(o));
+  url += '&destination=' + encodeURIComponent(fmt(d));
+  if (wpRaw) url += '&waypoints=' + encodeURIComponent(wpRaw);
+  url += '&travelmode=driving';
+  return url;
+}
+
+
+

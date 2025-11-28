@@ -1,0 +1,445 @@
+// ====== 設定 ======
+const SLACK_BOT_TOKEN = PropertiesService.getScriptProperties().getProperty("SLACK_BOT_TOKEN");
+const CHANNEL_ID      = PropertiesService.getScriptProperties().getProperty("CHANNEL_ID");
+const LOG_SHEET       = "受信ログ";
+const SPREADSHEET_ID  = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+
+
+
+// ===== Slackにボタン送信（テスト用） =====
+function sendButton() {
+  const message = {
+    channel: CHANNEL_ID,
+    text: "出勤・退勤ボタンを押してください！",
+    attachments: [
+      {
+        text: "選択してください",
+        fallback: "ボタンが表示されません",
+        callback_id: "attendance",
+        color: "#36a64f",
+        attachment_type: "default",
+        actions: [
+          { name: "punch_in",  text: "出勤",     type: "button", style: "primary" },
+          { name: "punch_out", text: "退勤",     type: "button", style: "danger"  },
+          { name: "oncall",    text: "オンコール", type: "button", style: "primary" }
+        ]
+      }
+    ]
+  };
+
+  const response = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+    method: "post",
+    contentType: "application/json",
+    headers: { "Authorization": "Bearer " + SLACK_BOT_TOKEN },
+    payload: JSON.stringify(message)
+  });
+
+  Logger.log("Slack response: " + response.getContentText());
+}
+
+// ===== Slackにボタン送信（テスト用） =====
+function sendButton() {
+  const message = {
+    channel: CHANNEL_ID,
+    text: "出勤・退勤ボタンを押してください！",
+    attachments: [
+      {
+        text: "選択してください",
+        fallback: "ボタンが表示されません",
+        callback_id: "attendance",
+        color: "#36a64f",
+        attachment_type: "default",
+        actions: [
+          { name: "punch_in", text: "出勤", type: "button", style: "primary" },
+          { name: "punch_out", text: "退勤", type: "button", style: "danger" }
+        ]
+      }
+    ]
+  };
+
+  UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + SLACK_BOT_TOKEN },
+    payload: JSON.stringify(message)
+  });
+}
+
+// ===== SlackからのPOSTを受け取る =====
+function doPost(e) {
+  Logger.log("🚀 doPost called! raw=%s", e ? e.postData?.contents : "no data");
+
+  try {
+    if (!e || !e.postData) {
+      Logger.log("⚠ no postData");
+      return ContentService.createTextOutput("no data");
+    }
+
+    const contentType = e.postData.type || "";
+    const raw = e.postData.contents || "";
+
+    // --- URL検証 (Event Subscriptions) ---
+    if (contentType.includes("application/json")) {
+      const body = JSON.parse(raw);
+      if (body.type === "url_verification" && body.challenge) {
+        Logger.log("✅ URL verification OK");
+        return ContentService.createTextOutput(body.challenge)
+          .setMimeType(ContentService.MimeType.TEXT);
+      }
+    }
+
+    // --- ボタン押下イベント (Interactivity & Shortcuts) ---
+    const params = parseFormUrlEncoded(raw);
+    if (!params.payload) {
+      Logger.log("⚠ payload empty");
+      return ContentService.createTextOutput("ok");
+    }
+
+    const payload = JSON.parse(params.payload);
+    Logger.log("📦 payload=%s", JSON.stringify(payload));
+
+    const action   = payload.actions?.[0]?.action_id || payload.actions?.[0]?.name || "";
+    const userName = payload.user?.username || payload.user?.name || payload.user?.id || "unknown";
+
+    Logger.log(`👤 ${userName} - action=${action}`);
+
+    // Slackに即レス（ボタン押し確認）
+    const resp = {
+      response_type: "in_channel",
+      replace_original: false,
+      text: `✅ ${userName} さんが「${action === "punch_in" ? "出勤" : "退勤"}」を押しました！`,
+    };
+
+    const output = ContentService.createTextOutput(JSON.stringify(resp))
+      .setMimeType(ContentService.MimeType.JSON);
+
+    // シート書き込み（受信ログのみ）
+    Utilities.sleep(300);
+    saveLogOnly(userName, action);
+
+    return output;
+
+  } catch (err) {
+    Logger.log("💥 doPost ERROR: %s", err.stack || err);
+    return ContentService.createTextOutput("Error: " + err);
+  }
+}
+
+// ===== URLエンコードされたデータをパース =====
+function parseFormUrlEncoded(body) {
+  const o = {};
+  body.split("&").forEach(kv => {
+    const [k, v] = kv.split("=");
+    if (k) o[decodeURIComponent(k)] = decodeURIComponent(v || "");
+  });
+  return o;
+}
+// ===== ここまでコピー=====
+
+
+// ===== 受信ログにのみ記録する関数 =====
+function saveLogOnly(userName, action) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const logSheet = ss.getSheetByName(LOG_SHEET);
+
+    if (!logSheet) {
+      Logger.log("⚠ シート「" + LOG_SHEET + "」が見つかりません");
+      return;
+    }
+
+    const now = new Date();
+    const dateStr = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd");
+    const timeStr = Utilities.formatDate(now, "Asia/Tokyo", "HH:mm:ss");
+
+    // ロック取得（同時書き込み防止）
+    const lock = LockService.getScriptLock();
+    lock.tryLock(3000);
+
+    // スプレッドシートに書き込み
+    logSheet.appendRow([now, userName, action, dateStr, timeStr]);
+    Logger.log("📝 受信ログに追記: " + userName + " / " + action);
+
+    lock.releaseLock();
+  } catch (err) {
+    Logger.log("💥 saveLogOnly ERROR: " + err);
+  }
+}
+
+function saveLogOnly_(userName, action) {
+  try {
+    Logger.log("🔍 openById 実行前: " + SPREADSHEET_ID);
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    Logger.log("✅ openById OK");
+    const logSheet = ss.getSheetByName(LOG_SHEET);
+    Logger.log("✅ getSheetByName OK");
+
+    const now = new Date();
+    const dateStr = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd");
+    const timeStr = Utilities.formatDate(now, "Asia/Tokyo", "HH:mm:ss");
+
+    const lock = LockService.getScriptLock();
+    lock.tryLock(3000);
+
+    logSheet.appendRow([now, userName, action, dateStr, timeStr]);
+    Logger.log("📝 受信ログに追記しました: " + userName + " / " + action);
+
+    lock.releaseLock();
+
+  } catch (err) {
+    Logger.log("💥 saveLogOnly_ ERROR: " + err);
+  }
+}  // ← ← ← ✨これが抜けてた！
+function testAuth() {
+  const id = "19V-S--MPEqAGgothYOfCRKNaq9-fuRLc-PYOJqpj6e8"; // ← IDだけ
+  const ss = SpreadsheetApp.openById(id);
+  const sheet = ss.getSheets()[0];
+  Logger.log("✅ 認証成功: " + sheet.getName());
+}
+
+// ===== 勤怠記録へ転記（出勤丸め・休憩優先・分単位計算・漢字名対応）=====
+function updateAttendanceSheet() {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const logSheet = ss.getSheetByName("受信ログ");
+    const attendanceSheet = ss.getSheetByName("勤怠記録");
+    const staffSheet = ss.getSheetByName("スタッフマスタ");
+
+    if (!logSheet || !attendanceSheet || !staffSheet) {
+      Logger.log("⚠ シートが見つからない");
+      return;
+    }
+
+    // ===== スタッフマスタ → Map(ID → {漢字名, 時給, 丸め時刻}) =====
+    const staffData = staffSheet.getDataRange().getValues();
+    staffData.shift(); // ヘッダー除去
+
+    const staffMap = new Map();
+
+    staffData.forEach(([id, wage, startTime, fullName]) => {
+      if (!id) return;
+
+      let startMinutes = null;
+      if (startTime instanceof Date) {
+        startMinutes = startTime.getHours() * 60 + startTime.getMinutes();
+      } else if (typeof startTime === "string" && startTime.includes(":")) {
+        startMinutes = toMinutes(startTime);
+      }
+
+      staffMap.set(String(id).trim(), {
+        id: String(id).trim(),
+        name: fullName || id,
+        wage: Number(wage) || 0,
+        startMinutes: startMinutes
+      });
+    });
+
+    // ===== 受信ログを集約（同一日付＋同一ID）=====
+    const logs = logSheet.getDataRange().getValues();
+    logs.shift();
+
+    const map = new Map();
+
+    logs.forEach(row => {
+      const [ts, name, action, date, time, rest] = row;
+      if (!name || !date || !time) return;
+
+      const key = `${date}_${name}`;
+      const obj = map.get(key) || { date, id: name, in: "", out: "", rest: "" };
+
+      if (action === "punch_in") obj.in = time;
+      if (action === "punch_out") obj.out = time;
+      if (rest) obj.rest = rest;
+
+      map.set(key, obj);
+    });
+
+    // ===== 勤怠記録 初期化 =====
+    attendanceSheet.clearContents();
+    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩"]);
+
+    const rows = [];
+
+    map.forEach(rec => {
+      const staff = staffMap.get(String(rec.id).trim());
+      if (!staff) return;
+
+      // ==== 出勤・退勤を分に変換 ====
+      const pressedStart = rec.in ? toMinutes(rec.in) : null;
+      const pressedEnd   = rec.out ? toMinutes(rec.out) : null;
+
+      // ==== 出勤丸め ====
+      let startMinutes = pressedStart;
+      if (pressedStart != null && staff.startMinutes != null) {
+        if (pressedStart < staff.startMinutes) {
+          startMinutes = staff.startMinutes;
+        }
+      }
+
+      const endMinutes = pressedEnd;
+
+      // ==== 休憩 ====
+      const restStr     = rec.rest ? rec.rest : "1:00";
+      const restMinutes = toMinutes(restStr);
+
+      // ==== 労働時間 ====
+      let workMinutes = 0;
+      if (startMinutes != null && endMinutes != null) {
+        workMinutes = Math.max(0, endMinutes - startMinutes - restMinutes);
+      }
+
+      // ==== 金額 ====
+      const normal = Math.min(workMinutes, 480);
+      const over   = Math.max(0, workMinutes - 480);
+
+      const money =
+        (normal / 60 * staff.wage) +
+        (over / 60 * staff.wage * 1.25);
+
+      // ==== 表示 ====
+      const startStr = startMinutes != null ? minutesToHHMM(startMinutes) : "";
+      const endStr   = endMinutes   != null ? minutesToHHMM(endMinutes)   : "";
+
+      rows.push([
+        rec.date,
+        staff.id,
+        staff.name,       // ← 漢字名（ここが今回の重要点）
+        startStr,
+        endStr,
+        minutesToHHMM(workMinutes),
+        money,
+        restStr
+      ]);
+    });
+
+    // ===== 出力 =====
+    if (rows.length) {
+      attendanceSheet.getRange(2,1,rows.length,8).setValues(rows);
+      attendanceSheet.getRange(2,6,rows.length,1).setNumberFormat("[h]:mm");
+      attendanceSheet.getRange(2,7,rows.length,1).setNumberFormat("¥#,##0");
+    }
+
+    Logger.log("✅ 勤怠記録 更新OK（名前・丸め対応）");
+
+  } catch (err) {
+    Logger.log("💥 updateAttendanceSheet ERROR: " + err);
+  }
+}
+
+
+// ====== 分変換 utilities ======
+function toMinutes(v) {
+  try {
+    if (v instanceof Date) {
+      return v.getHours() * 60 + v.getMinutes();
+    }
+    if (typeof v === "string") {
+      const [h,m] = v.split(":").map(Number);
+      return h*60 + m;
+    }
+    return 0;
+  } catch(e) { return 0; }
+}
+
+function minutesToHHMM(min) {
+  const h = Math.floor(min/60);
+  const m = min % 60;
+  return `${h}:${m.toString().padStart(2,"0")}`;
+}
+
+
+// ===== 月末個人シート（漢字名＋残業集計つき） =====
+function exportMonthlySheets() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const attendance = ss.getSheetByName("勤怠記録");
+
+  const data = attendance.getDataRange().getValues();
+  data.shift(); // header除去
+
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth() + 1;
+
+  // スタッフごとにまとめる（IDをキー）
+  const map = new Map();
+
+  data.forEach(r => {
+    // [日付, ID, 名前, 出勤, 退勤, 労働時間, 勤務金額, 休憩]
+    const date = r[0];
+    const id = r[1];
+    const fullName = r[2];
+
+    if (!(date instanceof Date)) return;
+
+    const y = date.getFullYear();
+    const m = date.getMonth() + 1;
+
+    if (y !== year || m !== month) return;
+
+    if (!map.has(id)) {
+      map.set(id, {
+        name: fullName,
+        rows: []
+      });
+    }
+    map.get(id).rows.push(r);
+  });
+
+  // ===== シート出力 =====
+  map.forEach((obj, id) => {
+    const name = obj.name;
+    const rows = obj.rows;
+
+    const sheetName = `${name}_${year}${String(month).padStart(2, "0")}`;
+
+    // 既存削除
+    const old = ss.getSheetByName(sheetName);
+    if (old) ss.deleteSheet(old);
+
+    const sh = ss.insertSheet(sheetName);
+
+    // ヘッダー（勤怠記録と同じ＋表示名付き）
+    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩"]);
+
+    // 本体
+    sh.getRange(2, 1, rows.length, 8).setValues(rows);
+
+    // ===== 合計行 =====
+    const totalRow = rows.length + 3;
+
+    // ラベル
+    sh.getRange(totalRow, 3).setValue("【合計】");
+
+    // 労働時間 合計
+    sh.getRange(totalRow, 6)
+      .setFormula(`=SUM(F2:F${rows.length + 1})`)
+      .setNumberFormat("[h]:mm");
+
+    // ===== 残業時間（1日8h超えた部分のみ合計） =====
+    // 労働時間が8:00 を超えた行だけ抽出して合計−8h×日数
+    const overtimeRow = totalRow + 1;
+    sh.getRange(overtimeRow, 3).setValue("残業時間");
+
+    sh.getRange(overtimeRow, 6)
+      .setFormula(
+        `=SUM(FILTER(F2:F${rows.length + 1}, F2:F${rows.length + 1} > TIME(8,0,0)))` +
+        ` - TIME(8,0,0) * COUNT(FILTER(F2:F${rows.length + 1}, F2:F${rows.length + 1} > TIME(8,0,0)))`
+      )
+      .setNumberFormat("[h]:mm");
+
+    // ===== 勤務金額 合計 =====
+    const moneyRow = totalRow + 2;
+    sh.getRange(moneyRow, 3).setValue("勤務金額 合計");
+
+    sh.getRange(moneyRow, 7)
+      .setFormula(`=SUM(G2:G${rows.length + 1})`)
+      .setNumberFormat("¥#,##0");
+
+    // 表示フォーマット
+    sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");
+
+    Logger.log(`📄 作成: ${sheetName}`);
+  });
+
+  Logger.log("🎉 個人シート（労働時間＋残業＋勤務金額 合計） 完成");
+}
