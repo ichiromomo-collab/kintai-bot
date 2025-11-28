@@ -427,11 +427,19 @@ function exportMonthlySheets() {
       )
       .setNumberFormat("[h]:mm");
 
-    // 金額
+    // ===== 勤務金額 合計 =====
+    const moneyRow = totalRow + 2;
+    sh.getRange(moneyRow, 3).setValue("勤務金額 合計");
+
+    sh.getRange(moneyRow, 7)
+      .setFormula(`=SUM(G2:G${rows.length + 1})`)
+      .setNumberFormat("¥#,##0");
+
+    // 表示フォーマット
     sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");
 
     Logger.log(`📄 作成: ${sheetName}`);
   });
 
-  Logger.log("🎉 個人シート（漢字名＋残業集計） 完成");
+  Logger.log("🎉 個人シート（労働時間＋残業＋勤務金額 合計） 完成");
 }
