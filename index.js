@@ -348,51 +348,90 @@ function minutesToHHMM(min) {
 }
 
 
-// ===== 月末個人シート（漢字名で出力）=====
+// ===== 月末個人シート（漢字名＋残業集計つき） =====
 function exportMonthlySheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const attendance = ss.getSheetByName("勤怠記録");
 
   const data = attendance.getDataRange().getValues();
-  data.shift(); // header
+  data.shift(); // header除去
 
   const today = new Date();
-  const y = today.getFullYear();
-  const m = today.getMonth() + 1;
+  const year = today.getFullYear();
+  const month = today.getMonth() + 1;
 
-  // スタッフごとにまとめ
+  // スタッフごとにまとめる（IDをキー）
   const map = new Map();
 
   data.forEach(r => {
-    const [date, id, name] = r;
-    if (!date) return;
+    // [日付, ID, 名前, 出勤, 退勤, 労働時間, 勤務金額, 休憩]
+    const date = r[0];
+    const id = r[1];
+    const fullName = r[2];
 
-    if (date.getFullYear() !== y || date.getMonth()+1 !== m) return;
+    if (!(date instanceof Date)) return;
 
-    if (!map.has(id)) map.set(id, { name, rows: [] });
+    const y = date.getFullYear();
+    const m = date.getMonth() + 1;
+
+    if (y !== year || m !== month) return;
+
+    if (!map.has(id)) {
+      map.set(id, {
+        name: fullName,
+        rows: []
+      });
+    }
     map.get(id).rows.push(r);
   });
 
-  // 出力
+  // ===== シート出力 =====
   map.forEach((obj, id) => {
-    const sheetName = `${obj.name}_${y}${String(m).padStart(2,"0")}`;
+    const name = obj.name;
+    const rows = obj.rows;
 
+    const sheetName = `${name}_${year}${String(month).padStart(2, "0")}`;
+
+    // 既存削除
     const old = ss.getSheetByName(sheetName);
     if (old) ss.deleteSheet(old);
 
     const sh = ss.insertSheet(sheetName);
-    sh.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩"]);
-    sh.getRange(2,1,obj.rows.length,8).setValues(obj.rows);
 
-    const total = obj.rows.length + 3;
-    sh.getRange(total,4).setValue("【合計】");
-    sh.getRange(total,6).setFormula(`=SUM(F2:F${obj.rows.length+1})`);
-    sh.getRange(total,7).setFormula(`=SUM(G2:G${obj.rows.length+1})`);
+    // ヘッダー（勤怠記録と同じ＋表示名付き）
+    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩"]);
 
-    sh.getRange(2,6,obj.rows.length,1).setNumberFormat("[h]:mm");
-    sh.getRange(2,7,obj.rows.length,1).setNumberFormat("¥#,##0");
+    // 本体
+    sh.getRange(2, 1, rows.length, 8).setValues(rows);
+
+    // ===== 合計行 =====
+    const totalRow = rows.length + 3;
+
+    // ラベル
+    sh.getRange(totalRow, 3).setValue("【合計】");
+
+    // 労働時間 合計
+    sh.getRange(totalRow, 6)
+      .setFormula(`=SUM(F2:F${rows.length + 1})`)
+      .setNumberFormat("[h]:mm");
+
+    // ===== 残業時間（1日8h超えた部分のみ合計） =====
+    // 労働時間が8:00 を超えた行だけ抽出して合計−8h×日数
+    const overtimeRow = totalRow + 1;
+    sh.getRange(overtimeRow, 3).setValue("残業時間");
+
+    sh.getRange(overtimeRow, 6)
+      .setFormula(
+        `=SUM(FILTER(F2:F${rows.length + 1}, F2:F${rows.length + 1} > TIME(8,0,0)))` +
+        ` - TIME(8,0,0) * COUNT(FILTER(F2:F${rows.length + 1}, F2:F${rows.length + 1} > TIME(8,0,0)))`
+      )
+      .setNumberFormat("[h]:mm");
+
+    // 金額
+    sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");
+
+    Logger.log(`📄 作成: ${sheetName}`);
   });
 
-  Logger.log("✅ 個人シート（漢字名） 完成");
+  Logger.log("🎉 個人シート（漢字名＋残業集計） 完成");
 }
-
