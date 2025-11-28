@@ -415,6 +415,15 @@ function exportMonthlySheets() {
       .setFormula(`=SUM(F2:F${rows.length + 1})`)
       .setNumberFormat("[h]:mm");
 
+    // ここに ↓ 追加
+   sh.getRange(2, 4, rows.length, 1).setNumberFormat("h:mm");     // 出勤
+   sh.getRange(2, 5, rows.length, 1).setNumberFormat("h:mm");     // 退勤
+   sh.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm");   // 労働時間
+   sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");   // 勤務金額
+   sh.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm");   // 休憩
+
+
+
     // ===== 残業時間（1日8h超えた部分のみ合計） =====
     // 労働時間が8:00 を超えた行だけ抽出して合計−8h×日数
     const overtimeRow = totalRow + 1;
