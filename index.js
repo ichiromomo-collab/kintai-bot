@@ -348,25 +348,59 @@ function minutesToHHMM(min) {
 }
 
 
-// ===== 月末個人シート（漢字名＋残業集計つき） =====
-function exportMonthlySheets() {
+// ===== ポップアップで年月を入力して出力 =====
+function exportMonthlySheetsPrompt() {
+
+  // 入力を促すダイアログ
+  const text = Browser.inputBox(
+    "月次シート出力",
+    "出力したい年月を 2025/11 の形式で入力してください。",
+    Browser.Buttons.OK_CANCEL
+  );
+
+  if (text === "cancel") return;
+
+  // 入力チェック
+  const match = text.match(/^(\d{4})\/(\d{1,2})$/);
+  if (!match) {
+    Browser.msgBox("⚠ 入力形式が正しくありません。\n例: 2025/11");
+    return;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+
+  // 実行
+  exportMonthlySheets(year, month);
+
+  Browser.msgBox(`📄 ${year}年${month}月 の個人シートを作成しました！`);
+}
+
+// ===== 月末個人シート（漢字名＋残業＋勤務金額） =====
+// exportMonthlySheets();          → 今月を出力
+// exportMonthlySheets(2025, 11);  → 2025年11月を出力
+function exportMonthlySheets(targetYear, targetMonth) {
+
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const attendance = ss.getSheetByName("勤怠記録");
 
   const data = attendance.getDataRange().getValues();
   data.shift(); // header除去
 
+  // --- 引数が無ければ「今日の年月」を使う ---
   const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
+  const year  = targetYear  || today.getFullYear();
+  const month = targetMonth || (today.getMonth() + 1);
 
-  // スタッフごとにまとめる（IDをキー）
+  Logger.log(`📅 出力対象: ${year}年${month}月`);
+
+  // --- スタッフごとにまとめる（IDごとに集計） ---
   const map = new Map();
 
   data.forEach(r => {
     // [日付, ID, 名前, 出勤, 退勤, 労働時間, 勤務金額, 休憩]
     const date = r[0];
-    const id = r[1];
+    const id   = r[1];
     const fullName = r[2];
 
     if (!(date instanceof Date)) return;
@@ -377,32 +411,37 @@ function exportMonthlySheets() {
     if (y !== year || m !== month) return;
 
     if (!map.has(id)) {
-      map.set(id, {
-        name: fullName,
-        rows: []
-      });
+      map.set(id, { name: fullName, rows: [] });
     }
     map.get(id).rows.push(r);
   });
 
-  // ===== シート出力 =====
+  // ================= ==== シート出力 =====================
   map.forEach((obj, id) => {
+
     const name = obj.name;
     const rows = obj.rows;
 
     const sheetName = `${name}_${year}${String(month).padStart(2, "0")}`;
 
-    // 既存削除
+    // 既存は削除
     const old = ss.getSheetByName(sheetName);
     if (old) ss.deleteSheet(old);
 
     const sh = ss.insertSheet(sheetName);
 
-    // ヘッダー（勤怠記録と同じ＋表示名付き）
+    // ヘッダー
     sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩"]);
 
-    // 本体
+    // 本文
     sh.getRange(2, 1, rows.length, 8).setValues(rows);
+
+    // ===== 自動フォーマット =====
+    sh.getRange(2, 4, rows.length, 1).setNumberFormat("h:mm");     // 出勤
+    sh.getRange(2, 5, rows.length, 1).setNumberFormat("h:mm");     // 退勤
+    sh.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm");   // 労働時間
+    sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");   // 勤務金額
+    sh.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm");   // 休憩
 
     // ===== 合計行 =====
     const totalRow = rows.length + 3;
@@ -415,17 +454,7 @@ function exportMonthlySheets() {
       .setFormula(`=SUM(F2:F${rows.length + 1})`)
       .setNumberFormat("[h]:mm");
 
-    // ここに ↓ 追加
-   sh.getRange(2, 4, rows.length, 1).setNumberFormat("h:mm");     // 出勤
-   sh.getRange(2, 5, rows.length, 1).setNumberFormat("h:mm");     // 退勤
-   sh.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm");   // 労働時間
-   sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");   // 勤務金額
-   sh.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm");   // 休憩
-
-
-
-    // ===== 残業時間（1日8h超えた部分のみ合計） =====
-    // 労働時間が8:00 を超えた行だけ抽出して合計−8h×日数
+    // ===== 残業時間（8h超） =====
     const overtimeRow = totalRow + 1;
     sh.getRange(overtimeRow, 3).setValue("残業時間");
 
@@ -444,11 +473,8 @@ function exportMonthlySheets() {
       .setFormula(`=SUM(G2:G${rows.length + 1})`)
       .setNumberFormat("¥#,##0");
 
-    // 表示フォーマット
-    sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");
-
     Logger.log(`📄 作成: ${sheetName}`);
   });
 
-  Logger.log("🎉 個人シート（労働時間＋残業＋勤務金額 合計） 完成");
+  Logger.log("🎉 個人シート（年月指定対応） 完成！");
 }
