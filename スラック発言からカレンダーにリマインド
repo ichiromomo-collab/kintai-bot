@@ -1,0 +1,174 @@
+// Slackに通知する
+function notifySlack(message) {
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8"; // ← Bot Tokenを貼り付け
+  const channel = "C098HMJV3AB"; // 連絡チャンネルID
+  const url = "https://slack.com/api/chat.postMessage";
+
+  const payload = {
+    channel: channel,
+    text: message
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    payload: JSON.stringify(payload)
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  Logger.log(response.getContentText());
+}
+
+// Slackユーザー名を取得（display_name優先）
+function getSlackUserName(userId) {
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8";
+  const url = "https://slack.com/api/users.info";
+
+  const options = {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(`${url}?user=${userId}`, options);
+  const data = JSON.parse(response.getContentText());
+
+  if (data.ok) {
+    return data.user.profile.display_name || data.user.real_name;
+  } else {
+    Logger.log("Slack API error: " + data.error);
+    return userId; // 失敗時はIDを返す
+  }
+}
+
+// Slackメッセージを取得して予定に変換
+function fetchSlackMessages() {
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8";
+  const channel = "C098HMJV3AB";//ブログ用チャンネルにしてる
+  const url = "https://slack.com/api/conversations.history";
+
+  const options = {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(`${url}?channel=${channel}&limit=10`, options);
+  const data = JSON.parse(response.getContentText());
+
+  if (data.ok) {
+    const messages = data.messages;
+    const lastTs = PropertiesService.getScriptProperties().getProperty("lastProcessedTs");
+    let newestTs = lastTs;
+
+    // 古い順に処理（新しい順で来るので逆順に）
+    messages.reverse().forEach(msg => {
+      if (msg.text && msg.user && !msg.subtype && (!lastTs || msg.ts > lastTs)) {
+        const message = msg.text.trim();
+        if (message) {
+          const 担当者 = getSlackUserName(msg.user);
+          const added = parseMessageAndAddEvent(message, 担当者); // ← 追加されたかどうかを返すようにする
+          if (added) {
+            notifySlack(`予定を追加しました：${message}`);
+          }
+          // ts を更新（最も新しいものを記録）
+          if (!newestTs || msg.ts > newestTs) {
+            newestTs = msg.ts;
+          }
+        }
+      }
+    });
+
+  // 最後にまとめて保存
+  if (newestTs && newestTs !== lastTs) {
+    PropertiesService.getScriptProperties().setProperty("lastProcessedTs", newestTs);
+  }
+　　else {
+    Logger.log("Slack API error: " + data.error);
+  }
+
+
+function parseMessageAndAddEvent(message, 担当者) {
+  if (!message) {
+    Logger.log("空のメッセージが渡されました");
+    return;
+  }
+
+  const calendar = CalendarApp.getCalendarById("houkan.omusubi1@gmail.com");
+
+  let title = "予定";
+  let startTime, endTime;
+
+  // 「明日10時」パターン
+  if (message.match(/明日.*?(\d{1,2})時/)) {
+    const hour = parseInt(RegExp.$1, 10);
+    const today = new Date();
+    today.setDate(today.getDate() + 1);
+    startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hour, 0);
+    endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hour + 1, 0);
+    title = "訪問予定";
+  }
+
+  // 「12/5 10:00」パターン（時間あり）
+  else if (message.match(/(\d{1,2})\/(\d{1,2}).*?(\d{1,2})[:：](\d{2})/)) {
+    const month = parseInt(RegExp.$1, 10) - 1;
+    const day = parseInt(RegExp.$2, 10);
+    const hour = parseInt(RegExp.$3, 10);
+    const minute = parseInt(RegExp.$4, 10);
+    const year = new Date().getFullYear();
+    startTime = new Date(year, month, day, hour, minute);
+    endTime = new Date(year, month, day, hour + 1, minute);
+  }
+
+  // 「12/5」パターン（時間なし）
+  else if (message.match(/(\d{1,2})\/(\d{1,2})/)) {
+    const month = parseInt(RegExp.$1, 10) - 1;
+    const day = parseInt(RegExp.$2, 10);
+    const year = new Date().getFullYear();
+    startTime = new Date(year, month, day, 10, 0);
+    endTime = new Date(year, month, day, 11, 0);
+    title = "面談予定";
+  }
+
+  // タイトル判定（上書き）
+  if (message.includes("忘年会")) {
+    title = "忘年会";
+  } else if (message.includes("担当者会議")) {
+    title = "担当者会議";
+  } else if (message.includes("歓迎会")) {
+    title = "歓迎会";
+  } else if (message.includes("求人")) {
+    title = "求人対応";
+  } else if (message.includes("見学")) {
+    title = "見学対応";
+  } else if (message.includes("面談")) {
+    title = "面談予定";
+  }
+
+  // 説明欄に「担当者」「内容」を記録
+  const description = `担当：${担当者}\n内容：${message}`;
+
+  if (startTime && endTime) {
+    const existingEvents = calendar.getEvents(startTime, endTime);
+    const alreadyExists = existingEvents.some(event =>
+      event.getTitle() === title &&
+      event.getDescription() === description
+    );
+
+    if (!alreadyExists) {
+      const event = calendar.createEvent(title, startTime, endTime);
+      event.setDescription(description);
+    } else {
+      Logger.log("既に同じ予定が存在します: " + title);
+    }
+  } else {
+    Logger.log("日付や時間が特定できませんでした: " + message);
+  }
+}
