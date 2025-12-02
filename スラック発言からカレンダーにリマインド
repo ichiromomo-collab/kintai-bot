@@ -1,6 +1,6 @@
 // Slackに通知する
 function notifySlack(message) {
-  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8"; // ← Bot Tokenを貼り付け
+  const token = ""; // ← Bot Tokenを貼り付け
   const channel = "C098HMJV3AB"; // 連絡チャンネルID
   const url = "https://slack.com/api/chat.postMessage";
 
