@@ -1,0 +1,352 @@
+// Slackに通知する
+function notifySlack(message) {
+
+  // ★ 空メッセージは送らない
+  if (!message || message.trim() === "") {
+    Logger.log("notifySlack: empty message → 送信スキップ");
+    return;
+  }
+
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8"; // ← Bot Tokenを貼り付け
+  const channel = "C0981JUPKRT"; // 連絡チャンネルID C0981JUPKRT
+  const url = "https://slack.com/api/chat.postMessage";
+
+  const payload = {
+    channel: channel,
+    text: message
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    payload: JSON.stringify(payload)
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  Logger.log(response.getContentText());
+}
+
+// Slackユーザー名を取得（display_name優先）
+function getSlackUserName(userId) {
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8";
+  const url = "https://slack.com/api/users.info";
+
+  const options = {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(`${url}?user=${userId}`, options);
+  const text = response.getContentText();
+  Logger.log("Slack raw response: " + text);
+  const data = JSON.parse(text);
+
+  if (data.ok) {
+    return data.user.profile.display_name || data.user.real_name;
+  } else {
+    Logger.log("Slack API error: " + data.error);
+    return userId;
+  }
+}
+
+
+// ここから追加：Slackメッセージからプレーンテキストを取り出す
+function extractPlainText(msg) {
+  // 引数がないとき・変な値のときは空文字で返す
+  if (!msg) return "";
+
+  // 1) 普通の text があればそれを使う
+  if (typeof msg.text === "string" && msg.text.trim() !== "") {
+    return msg.text.trim();
+  }
+
+  // 2) Block Kit の中から text 情報を拾う
+  if (msg.blocks && Array.isArray(msg.blocks)) {
+    let text = "";
+
+    msg.blocks.forEach(block => {
+      if (block.type === "rich_text" && Array.isArray(block.elements)) {
+        block.elements.forEach(el => {
+          if (el.type === "rich_text_section" && Array.isArray(el.elements)) {
+            el.elements.forEach(seg => {
+              if (seg.type === "text" && typeof seg.text === "string") {
+                text += seg.text;
+              }
+            });
+          }
+        });
+      }
+    });
+
+    return text.trim();
+  }
+
+  // どれにも当てはまらないとき
+  return "";
+}
+
+// Slackメッセージを取得して予定に変換
+function fetchSlackMessages() {
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8";
+  const channel = "C0981JUPKRT";
+  const url = "https://slack.com/api/conversations.history";
+
+  const options = {
+    method: "get",
+    headers: { Authorization: "Bearer " + token },
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(`${url}?channel=${channel}&limit=20`, options);
+  const data = JSON.parse(response.getContentText());
+  Logger.log(JSON.stringify(data, null, 2));
+
+  if (!data.ok) {
+    Logger.log("Slack API error: " + data.error);
+    return;
+  }
+
+  const messages = data.messages;
+  const lastTs = PropertiesService.getScriptProperties().getProperty("lastProcessedTs");
+  let newestTs = lastTs;
+
+  // メッセージ処理ループ内
+messages.reverse().forEach(msg => {
+
+  const message = extractPlainText(msg);
+
+  if (
+    message !== "" &&
+    msg.user &&
+    (!msg.subtype || msg.subtype === "thread_broadcast") &&
+    (!lastTs || msg.ts > lastTs)
+  ) {
+
+    const 担当者 = getSlackUserName(msg.user);
+    const added = parseMessageAndAddEvent(message, 担当者);
+
+    if (added) {
+      notifySlack(`予定を追加しました：${message}`);
+    }
+
+    // 追加されなくても「処理した」という扱いで TS を進める
+    newestTs = msg.ts;
+  }
+});
+
+
+  // ★ ここで “最後に処理した ts” を保存 → 次回はそこから先だけ読む
+  if (newestTs && newestTs !== lastTs) {
+    PropertiesService.getScriptProperties().setProperty("lastProcessedTs", newestTs);
+    Logger.log("lastProcessedTs updated → " + newestTs);
+  }
+}
+
+// Slackのメッセージ1件をカレンダー予定に変換
+function parseMessageAndAddEvent(message, 担当者) {
+  if (!message) {
+    Logger.log("空のメッセージが渡されました");
+    return false;
+  }
+
+  const calendar = CalendarApp.getCalendarById("houkan.omusubi1@gmail.com");
+
+  let title = "予定";
+  let startTime, endTime;
+
+  // 「明日10時」パターン
+  const m1 = message.match(/明日.*?(\d{1,2})時/);
+  if (m1) {
+    const hour = parseInt(m1[1], 10);
+    const next = new Date();
+    next.setDate(next.getDate() + 1);
+    startTime = new Date(next.getFullYear(), next.getMonth(), next.getDate(), hour, 0);
+    endTime   = new Date(next.getFullYear(), next.getMonth(), next.getDate(), hour + 1, 0);
+    title = "訪問予定";
+  }
+
+  // 「12/6 12:30」みたいに分・コロン指定あり
+  if (!startTime) {
+    const mColon = message.match(/(\d{1,2})\/(\d{1,2})[ 　]*([0-2]?\d)[:：]([0-5]\d)/);
+    if (mColon) {
+      const year  = new Date().getFullYear();
+      const month = parseInt(mColon[1], 10) - 1;
+      const day   = parseInt(mColon[2], 10);
+      const hour  = parseInt(mColon[3], 10);
+      const min   = parseInt(mColon[4], 10);
+      startTime = new Date(year, month, day, hour, min);
+      endTime   = new Date(year, month, day, hour + 1, min);
+    }
+  }
+
+  // 「12/6 12時」パターン（分なし → ちょうど00分）
+  if (!startTime) {
+    const mHour = message.match(/(\d{1,2})\/(\d{1,2})[ 　]*([0-2]?\d)時/);
+    if (mHour) {
+      const year  = new Date().getFullYear();
+      const month = parseInt(mHour[1], 10) - 1;
+      const day   = parseInt(mHour[2], 10);
+      const hour  = parseInt(mHour[3], 10);
+      startTime = new Date(year, month, day, hour, 0);
+      endTime   = new Date(year, month, day, hour + 1, 0);
+    }
+  }
+
+  // 「12/6」だけ（時間指定なし → デフォルト10:00〜11:00）
+  if (!startTime) {
+    const mDateOnly = message.match(/(\d{1,2})\/(\d{1,2})/);
+    if (mDateOnly) {
+      const year  = new Date().getFullYear();
+      const month = parseInt(mDateOnly[1], 10) - 1;
+      const day   = parseInt(mDateOnly[2], 10);
+      startTime = new Date(year, month, day, 10, 0);
+      endTime   = new Date(year, month, day, 11, 0);
+    }
+  }
+
+  // タイトル補正
+  if (message.includes("忘年会"))    title = "忘年会";
+  if (message.includes("担当者会議")) title = "担当者会議";
+  if (message.includes("歓迎会"))    title = "歓迎会";
+  if (message.includes("求人"))      title = "求人対応";
+  if (message.includes("見学"))      title = "見学対応";
+  if (message.includes("面談"))      title = "面談予定";
+
+  // 説明
+  const description = `担当：${担当者}\n内容：${message}`;
+
+  // 日付が決まらなければ終了
+  if (!startTime || !endTime) {
+    Logger.log("日付や時間が特定できませんでした: " + message);
+    return false;
+  }
+
+  // 同一イベント確認（タイトル＋開始時刻が完全一致ならスキップ）
+  const events = calendar.getEvents(startTime, endTime);
+  const exists = events.some(e =>
+    e.getTitle() === title &&
+    e.getStartTime().getTime() === startTime.getTime()
+  );
+
+  if (exists) {
+    Logger.log("既に同じ予定があります: " + title);
+    return false;
+  }
+
+  // 作成
+  const event = calendar.createEvent(title, startTime, endTime);
+  event.setDescription(description);
+
+  return true;
+}
+
+
+// おまけ：中括弧チェック（必要なら使う）
+function checkBrackets() {
+  const code = DriveApp.getFileById(ScriptApp.getScriptId())
+                       .getBlob().getDataAsString();
+  let stack = [];
+  let line = 1;
+
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (c === "\n") line++;
+    if (c === "{") stack.push(line);
+    if (c === "}") {
+      if (stack.length === 0) {
+        Logger.log("❌ 余分な } を検出 → 行番号: " + line);
+        return;
+      }
+      stack.pop();
+    }
+  }
+
+  if (stack.length > 0) {
+    Logger.log("❌ 閉じられていない { が存在 → 行番号: " +
+               stack[stack.length - 1]);
+  } else {
+    Logger.log("⭕ 中括弧の整合性 OK");
+  }
+}
+
+  //前日に通知する
+ function notifyTomorrowEvents() {
+  const calendar = CalendarApp.getCalendarById("houkan.omusubi1@gmail.com");
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8"; 
+  const channel = "C0981JUPKRT";
+
+  const now = new Date();
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+  const events = calendar.getEventsForDay(tomorrow);
+  if (events.length === 0) {
+    return;
+  }
+
+   const week = ["日", "月", "火", "水", "木", "金", "土"];
+   const w = week[tomorrow.getDay()];
+
+    let text = `【明日の予定】\n（${tomorrow.getMonth() + 1}/${tomorrow.getDate()}（${w}））\n\n`;
+
+
+  events.forEach(ev => {
+    const start = Utilities.formatDate(ev.getStartTime(), "Asia/Tokyo", "HH:mm");
+    const end   = Utilities.formatDate(ev.getEndTime(),   "Asia/Tokyo", "HH:mm");
+    text += `・${start}〜${end}　${ev.getTitle()}\n`;
+  });
+
+  UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+    method: "post",
+    headers: { Authorization: `Bearer ${token}` },
+    contentType: "application/json",
+    payload: JSON.stringify({
+      channel: channel,
+      text: text
+    })
+  });
+}
+//週初め通知
+function notifyWeeklyEvents() {
+  const calendar = CalendarApp.getCalendarById("houkan.omusubi1@gmail.com");
+  const token = "xoxb-9276453172948-10032330419026-h20lk5QAef94BQNiXltldRD8";
+  const channel = "C0981JUPKRT";
+
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+
+  const events = calendar.getEvents(start, end);
+  if (events.length === 0) {
+    return;
+  }
+
+  const week = ["日", "月", "火", "水", "木", "金", "土"];
+
+  const startW = week[start.getDay()];
+  const endW   = week[end.getDay()];
+
+   let text = `【今週の予定】\n（${start.getMonth() + 1}/${start.getDate()}（${startW}）〜${end.getMonth() + 1}/${end.getDate()}（${endW}））\n\n`;
+
+
+  events.forEach(ev => {
+    const day  = Utilities.formatDate(ev.getStartTime(), "Asia/Tokyo", "M/d");
+    const time = Utilities.formatDate(ev.getStartTime(), "Asia/Tokyo", "HH:mm");
+    text += `・${day} ${time}　${ev.getTitle()}\n`;
+  });
+
+  UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+    method: "post",
+    headers: { Authorization: `Bearer ${token}` },
+    contentType: "application/json",
+    payload: JSON.stringify({
+      channel: channel,
+      text: text
+    })
+  });
+}
