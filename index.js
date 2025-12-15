@@ -227,12 +227,12 @@ function updateAttendanceSheet() {
       }
 
        staffMap.set(String(id).trim(), {
-    id: String(id).trim(),
-    name: fullName || id,
-    wage: Number(wage) || 0,
-    startMinutes: toMinutes(startTime),
-    endMinutes: toMinutes(endTime),
-    allowOver: Number(allowOver) === 1
+     id: String(id).trim(),
+     name: fullName || id,
+     wage: Number(wage) || 0,
+     startMinutes: toMinutes(startTime),
+     endMinutes: toMinutes(endTime),
+     allowOver: Number(allowOver) === 1
       });
     });
 
@@ -278,6 +278,12 @@ function updateAttendanceSheet() {
         }
       }
 
+      // 🔴 残業禁止なら終業時刻で強制カット
+      if (!staff.allowOver && staff.endMinutes != null && endMinutes != null) {
+      if (endMinutes > staff.endMinutes) {
+    endMinutes = staff.endMinutes;
+     }
+     }
       const endMinutes = pressedEnd;
 
       // ==== 休憩 ====
