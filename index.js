@@ -277,6 +277,8 @@ function updateAttendanceSheet() {
           startMinutes = staff.startMinutes;
         }
       }
+     const endMinutesRaw = pressedEnd;
+     let endMinutes = endMinutesRaw;
 
       // 🔴 残業禁止なら終業時刻で強制カット
       if (!staff.allowOver && staff.endMinutes != null && endMinutes != null) {
@@ -284,11 +286,25 @@ function updateAttendanceSheet() {
     endMinutes = staff.endMinutes;
      }
      }
-      const endMinutes = pressedEnd;
+      // ==== 出勤・退勤が確定したあと ====
+     const rawWorkMinutes = endMinutes - startMinutes;
 
-      // ==== 休憩 ====
-      const restStr     = rec.rest ? rec.rest : "1:00";
-      const restMinutes = toMinutes(restStr);
+     // ==== 休憩（時間のみ管理）====
+     let restMinutes;
+     let restStr;
+     
+     if (rec.rest) {
+     restMinutes = toMinutes(rec.rest);
+     restStr = rec.rest;
+     } else {
+      if (rawWorkMinutes < 360) {
+     restMinutes = 0;
+     restStr = "0:00";
+      } else {
+     restMinutes = 60;   // ← 規則で決めた時間
+     restStr = "1:00";
+        }
+      }
 
       // ==== 労働時間 ====
       let workMinutes = 0;
