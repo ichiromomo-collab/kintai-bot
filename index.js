@@ -305,6 +305,9 @@ function updateAttendanceSheet() {
      restStr = "1:00";
         }
       }
+      //===残業許可 ====
+      const allowOverToday = rec.allowOver === "OK";
+
 
       // ==== 労働時間 ====
       let workMinutes = 0;
