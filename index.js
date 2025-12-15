@@ -247,7 +247,8 @@ function updateAttendanceSheet() {
       if (!name || !date || !time) return;
 
       const key = `${date}_${name}`;
-      const obj = map.get(key) || { date, id: name, in: "", out: "", rest: "" };
+      const obj = map.get(key) || { date, id: name, in: "", out: "", rest: "",
+      allowOver: ""  };
 
       if (action === "punch_in") obj.in = time;
       if (action === "punch_out") obj.out = time;
@@ -258,7 +259,7 @@ function updateAttendanceSheet() {
 
     // ===== 勤怠記録 初期化 =====
     attendanceSheet.clearContents();
-    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩"]);
+    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可"]);
 
     const rows = [];
 
@@ -277,15 +278,20 @@ function updateAttendanceSheet() {
           startMinutes = staff.startMinutes;
         }
       }
-     const endMinutesRaw = pressedEnd;
-     let endMinutes = endMinutesRaw;
 
-      // 🔴 残業禁止なら終業時刻で強制カット
-      if (!staff.allowOver && staff.endMinutes != null && endMinutes != null) {
-      if (endMinutes > staff.endMinutes) {
+      // ==== 退勤（いったん実打刻）====
+     let endMinutes = pressedEnd;
+
+     // ==== 残業判定（★ここ重要）====
+     const allowOverToday = rec.allowOver === "OK";
+
+     // 残業NGの日は定時でカット
+     if (!allowOverToday && staff.endMinutes != null && endMinutes != null) {
+     if (endMinutes > staff.endMinutes) {
     endMinutes = staff.endMinutes;
      }
      }
+
       // ==== 出勤・退勤が確定したあと ====
      const rawWorkMinutes = endMinutes - startMinutes;
 
@@ -305,9 +311,6 @@ function updateAttendanceSheet() {
      restStr = "1:00";
         }
       }
-      //===残業許可 ====
-      const allowOverToday = rec.allowOver === "OK";
-
 
       // ==== 労働時間 ====
       let workMinutes = 0;
@@ -335,13 +338,14 @@ function updateAttendanceSheet() {
         endStr,
         minutesToHHMM(workMinutes),
         money,
-        restStr
+        restStr,
+        rec.allowOver
       ]);
     });
 
     // ===== 出力 =====
     if (rows.length) {
-      attendanceSheet.getRange(2,1,rows.length,8).setValues(rows);
+      attendanceSheet.getRange(2,1,rows.length,9).setValues(rows);
       attendanceSheet.getRange(2,6,rows.length,1).setNumberFormat("[h]:mm");
       attendanceSheet.getRange(2,7,rows.length,1).setNumberFormat("¥#,##0");
     }
@@ -458,7 +462,7 @@ function exportMonthlySheets(targetYear, targetMonth) {
     const sh = ss.insertSheet(sheetName);
 
     // ヘッダー
-    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩"]);
+    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩",]);
 
     // 本文
     sh.getRange(2, 1, rows.length, 8).setValues(rows);
