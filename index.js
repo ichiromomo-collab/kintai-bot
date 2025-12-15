@@ -216,7 +216,7 @@ function updateAttendanceSheet() {
 
     const staffMap = new Map();
 
-    staffData.forEach(([id, wage, startTime, fullName]) => {
+    staffData.forEach(([id, wage, startTime, endTime, allowOver, fullName]) => {
       if (!id) return;
 
       let startMinutes = null;
@@ -226,11 +226,13 @@ function updateAttendanceSheet() {
         startMinutes = toMinutes(startTime);
       }
 
-      staffMap.set(String(id).trim(), {
-        id: String(id).trim(),
-        name: fullName || id,
-        wage: Number(wage) || 0,
-        startMinutes: startMinutes
+       staffMap.set(String(id).trim(), {
+    id: String(id).trim(),
+    name: fullName || id,
+    wage: Number(wage) || 0,
+    startMinutes: toMinutes(startTime),
+    endMinutes: toMinutes(endTime),
+    allowOver: Number(allowOver) === 1
       });
     });
 
