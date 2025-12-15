@@ -282,9 +282,21 @@ function updateAttendanceSheet() {
       // ==== 退勤（いったん実打刻）====
      let endMinutes = pressedEnd;
 
-     // ==== 残業判定（★ここ重要）====
-     const allowOverToday = rec.allowOver === "OK";
+     // ===== 残業許可（OK）の可視化 =====
+const lastRow = attendanceSheet.getLastRow();
+if (lastRow > 1) {
+  const rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("OK")
+    .setBackground("#ffd6d6") // うす赤
+    .setRanges([attendanceSheet.getRange(2, 9, lastRow - 1, 1)]) // I列
+    .build();
 
+  const rules = attendanceSheet.getConditionalFormatRules();
+  rules.push(rule);
+  attendanceSheet.setConditionalFormatRules(rules);
+}
+   
+    
      // 残業NGの日は定時でカット
      if (!allowOverToday && staff.endMinutes != null && endMinutes != null) {
      if (endMinutes > staff.endMinutes) {
@@ -329,6 +341,10 @@ function updateAttendanceSheet() {
       // ==== 表示 ====
       const startStr = startMinutes != null ? minutesToHHMM(startMinutes) : "";
       const endStr   = endMinutes   != null ? minutesToHHMM(endMinutes)   : "";
+      let warning = "";
+      if (rec.allowOver === "OK" && workMinutes <= 480) {
+      warning = "⚠ OKだが残業なし";
+      }
 
       rows.push([
         rec.date,
@@ -339,15 +355,17 @@ function updateAttendanceSheet() {
         minutesToHHMM(workMinutes),
         money,
         restStr,
-        rec.allowOver
+        rec.allowOver,
+        warning
       ]);
     });
 
     // ===== 出力 =====
     if (rows.length) {
-      attendanceSheet.getRange(2,1,rows.length,9).setValues(rows);
-      attendanceSheet.getRange(2,6,rows.length,1).setNumberFormat("[h]:mm");
-      attendanceSheet.getRange(2,7,rows.length,1).setNumberFormat("¥#,##0");
+      attendanceSheet.getRange(2,1,rows.length,10).setValues(rows);
+      attendanceSheet.getRange(2,6,rows.length,1).setNumberFormat("[h]:mm");//労働時間
+      attendanceSheet.getRange(2,7,rows.length,1).setNumberFormat("¥#,##0");//金額
+      attendanceSheet.getRange(2,8,rows.length,1).setNumberFormat("[h]:mm"); // 休憩
     }
 
     Logger.log("✅ 勤怠記録 更新OK（名前・丸め対応）");
@@ -462,7 +480,7 @@ function exportMonthlySheets(targetYear, targetMonth) {
     const sh = ss.insertSheet(sheetName);
 
     // ヘッダー
-    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩",]);
+    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩","残業許可","警告"]);
 
     // 本文
     sh.getRange(2, 1, rows.length, 8).setValues(rows);
