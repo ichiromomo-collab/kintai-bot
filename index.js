@@ -359,7 +359,7 @@ function updateAttendanceSheet() {
      .whenFormulaSatisfied(
       '=OR(AND($D2="", $E2<>""), AND($D2<>"", $E2=""))'
      )
-     .setBackground("#F46A6A ") // 警告赤
+     .setBackground("#F46A6A") // 警告赤
      .setRanges([sheet.getRange(`D2:E${lastRow}`)])
      .build()
      );
@@ -469,8 +469,8 @@ function minutesToHHMM(min) {
 }
 
 
-// ===== ポップアップで年月を入力して出力 =====
-function exportMonthlySheetsPrompt() {
+  // ===== ポップアップで年月を入力して出力 =====
+  function exportMonthlySheetsPrompt() {
 
   // 入力を促すダイアログ
   const text = Browser.inputBox(
@@ -495,12 +495,12 @@ function exportMonthlySheetsPrompt() {
   exportMonthlySheets(year, month);
 
   Browser.msgBox(`📄 ${year}年${month}月 の個人シートを作成しました！`);
-}
+ }
 
-// ===== 月末個人シート（漢字名＋残業＋勤務金額） =====
-// exportMonthlySheets();          → 今月を出力
-// exportMonthlySheets(2025, 11);  → 2025年11月を出力
-function exportMonthlySheets(targetYear, targetMonth) {
+  // ===== 月末個人シート（漢字名＋残業＋勤務金額） =====
+  // exportMonthlySheets();          → 今月を出力
+  // exportMonthlySheets(2025, 11);  → 2025年11月を出力
+  function exportMonthlySheets(targetYear, targetMonth) {
 
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const attendance = ss.getSheetByName("勤怠記録");
