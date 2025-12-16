@@ -342,7 +342,75 @@ function updateAttendanceSheet() {
       attendanceSheet.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm"); // 休憩
 
      // ← ここで色付け復活
-      applyAttendanceFormatting(attendanceSheet, rows.length + 1);
+     // ===== 勤怠記録の色付け（段階グラデーション風） =====
+    function applyAttendanceFormatting(sheet, lastRow) {
+
+     // 既存ルール全削除（重複防止）
+     sheet.setConditionalFormatRules([]);
+
+     const rules = [];
+
+     const dataRows = Math.max(1, lastRow - 1);
+
+      // ========= ① 時間が入っているセル → 薄緑 =========
+     const timeGreen = "#e6f4ea";
+
+      ["D","E","H"].forEach(col => {
+      rules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(`=AND(${col}2<>"",${col}2<>0)`)
+        .setBackground(timeGreen)
+        .setRanges([sheet.getRange(`${col}2:${col}${lastRow}`)])
+        .build()
+       );
+      });
+
+      // ========= ② 労働時間（F列）黄色グラデーション =========
+      rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=$F2>TIME(8,0,0)')
+      .setBackground("#ffe699") // 濃い黄
+      .setRanges([sheet.getRange(2, 6, dataRows, 1)])
+      .build()
+      );
+
+      rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND($F2>=TIME(6,0,0),$F2<=TIME(8,0,0))')
+      .setBackground("#fff2cc") // 中黄
+      .setRanges([sheet.getRange(2, 6, dataRows, 1)])
+      .build()
+      );
+
+       // ========= ③ 休憩時間（H列）赤グラデーション =========
+      rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=$H2>=TIME(1,0,0)')
+      .setBackground("#f4cccc") // 濃赤
+      .setRanges([sheet.getRange(2, 8, dataRows, 1)])
+      .build()
+      );
+
+      rules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND($H2>0,$H2<TIME(1,0,0))')
+      .setBackground("#fce5cd") // 薄赤
+      .setRanges([sheet.getRange(2, 8, dataRows, 1)])
+      .build()
+       );
+
+      // ========= ④ 残業許可 OK（I列） =========
+      rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo("OK")
+      .setBackground("#ffd6d6")
+      .setRanges([sheet.getRange(2, 9, dataRows, 1)])
+      .build()
+      );
+
+     sheet.setConditionalFormatRules(rules);
+     }
+
     
 
       // 「残業許可=OK」だけ薄赤（※毎回ルールを増やさないように、いったん置き換え）
@@ -358,12 +426,12 @@ function updateAttendanceSheet() {
       attendanceSheet.setConditionalFormatRules([rule]);
     }
 
-    Logger.log("✅ 勤怠記録 更新OK（残業OKは受信ログ管理）");
+     Logger.log("✅ 勤怠記録 更新OK（残業OKは受信ログ管理）");
 
-  } catch (err) {
-    Logger.log("💥 updateAttendanceSheet ERROR: " + (err.stack || err));
-  }
-}
+     } catch (err) {
+     Logger.log("💥 updateAttendanceSheet ERROR: " + (err.stack || err));
+     }
+     }
 
 
 // ====== 分変換 utilities ======
