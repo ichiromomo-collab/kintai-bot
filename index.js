@@ -377,7 +377,7 @@ function updateAttendanceSheet() {
 
       rules.push(
      SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=AND($F2>=TIME(6,0,0),$F2<=TIME(8,0,0))')
+      .whenFormulaSatisfied('=AND($F2>=TIME(5,30,0),$F2<=TIME(8,0,0))')
       .setBackground("#FFF0A6") // 中黄
       .setRanges([sheet.getRange(2, 6, dataRows, 1)])
       .build()
