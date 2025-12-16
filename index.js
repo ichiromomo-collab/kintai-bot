@@ -341,6 +341,10 @@ function updateAttendanceSheet() {
       attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0"); // 金額
       attendanceSheet.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm"); // 休憩
 
+     // ← ここで色付け復活
+      applyAttendanceFormatting(attendanceSheet, rows.length + 1);
+    
+
       // 「残業許可=OK」だけ薄赤（※毎回ルールを増やさないように、いったん置き換え）
       const lastRow = attendanceSheet.getLastRow();
       const rangeI = attendanceSheet.getRange(2, 9, Math.max(0, lastRow - 1), 1);
