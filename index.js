@@ -197,7 +197,7 @@ function testAuth() {
   Logger.log("✅ 認証成功: " + sheet.getName());
 }
 
-// ===== 勤怠記録へ転記（出勤丸め・休憩優先・分単位計算・漢字名対応）=====
+// ===== 勤怠記録へ転記（出勤丸め・休憩は時間のみ・残業OKは受信ログで管理）=====
 function updateAttendanceSheet() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -210,54 +210,55 @@ function updateAttendanceSheet() {
       return;
     }
 
-    // ===== スタッフマスタ → Map(ID → {漢字名, 時給, 丸め時刻}) =====
+    // ===== スタッフマスタ → Map(ID → {漢字名, 時給, 丸め時刻, 定時}) =====
     const staffData = staffSheet.getDataRange().getValues();
-    staffData.shift(); // ヘッダー除去
+    staffData.shift();
 
     const staffMap = new Map();
-
-    staffData.forEach(([id, wage, startTime, endTime, allowOver, fullName]) => {
+    staffData.forEach(([id, wage, startTime, endTime, fullName]) => {
       if (!id) return;
 
-      let startMinutes = null;
-      if (startTime instanceof Date) {
-        startMinutes = startTime.getHours() * 60 + startTime.getMinutes();
-      } else if (typeof startTime === "string" && startTime.includes(":")) {
-        startMinutes = toMinutes(startTime);
-      }
-
-       staffMap.set(String(id).trim(), {
-     id: String(id).trim(),
-     name: fullName || id,
-     wage: Number(wage) || 0,
-     startMinutes: toMinutes(startTime),
-     endMinutes: toMinutes(endTime),
-     allowOver: Number(allowOver) === 1
+      staffMap.set(String(id).trim(), {
+        id: String(id).trim(),
+        name: fullName || id,
+        wage: Number(wage) || 0,
+        startMinutes: toMinutes(startTime), // 丸め開始
+        endMinutes: toMinutes(endTime)      // 定時
       });
     });
 
     // ===== 受信ログを集約（同一日付＋同一ID）=====
+    // 受信ログの列想定：
+    // [ts, id, action, dateStr, timeStr, restStr, allowOver]
     const logs = logSheet.getDataRange().getValues();
     logs.shift();
 
     const map = new Map();
 
     logs.forEach(row => {
-      const [ts, name, action, date, time, rest] = row;
-      if (!name || !date || !time) return;
+      const [ts, id, action, dateStr, timeStr, restStr, allowOver] = row;
+      if (!id || !dateStr || !timeStr) return;
 
-      const key = `${date}_${name}`;
-      const obj = map.get(key) || { date, id: name, in: "", out: "", rest: "",
-      allowOver: ""  };
+      const key = `${dateStr}_${String(id).trim()}`;
+      const obj = map.get(key) || {
+        date: dateStr,
+        id: String(id).trim(),
+        in: "",
+        out: "",
+        rest: "",
+        allowOver: ""   // ← 受信ログで保持
+      };
 
-      if (action === "punch_in") obj.in = time;
-      if (action === "punch_out") obj.out = time;
-      if (rest) obj.rest = rest;
+      if (action === "punch_in")  obj.in  = timeStr;
+      if (action === "punch_out") obj.out = timeStr;
+
+      if (restStr) obj.rest = restStr;
+      if (allowOver) obj.allowOver = String(allowOver).trim(); // "OK" 想定
 
       map.set(key, obj);
     });
 
-    // ===== 勤怠記録 初期化 =====
+    // ===== 勤怠記録 初期化（ここは消してOK。入力は受信ログだから問題なし）=====
     attendanceSheet.clearContents();
     attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可"]);
 
@@ -267,60 +268,42 @@ function updateAttendanceSheet() {
       const staff = staffMap.get(String(rec.id).trim());
       if (!staff) return;
 
-      // ==== 出勤・退勤を分に変換 ====
       const pressedStart = rec.in ? toMinutes(rec.in) : null;
       const pressedEnd   = rec.out ? toMinutes(rec.out) : null;
 
       // ==== 出勤丸め ====
       let startMinutes = pressedStart;
       if (pressedStart != null && staff.startMinutes != null) {
-        if (pressedStart < staff.startMinutes) {
-          startMinutes = staff.startMinutes;
-        }
+        if (pressedStart < staff.startMinutes) startMinutes = staff.startMinutes;
       }
 
-      // ==== 退勤（いったん実打刻）====
-     let endMinutes = pressedEnd;
+      // ==== 退勤 ====
+      let endMinutes = pressedEnd;
 
-     // ===== 残業許可（OK）の可視化 =====
-const lastRow = attendanceSheet.getLastRow();
-if (lastRow > 1) {
-  const rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("OK")
-    .setBackground("#ffd6d6") // うす赤
-    .setRanges([attendanceSheet.getRange(2, 9, lastRow - 1, 1)]) // I列
-    .build();
+      // ==== 残業許可（受信ログのOKを見る）====
+      const allowOverToday = (rec.allowOver === "OK");
 
-  const rules = attendanceSheet.getConditionalFormatRules();
-  rules.push(rule);
-  attendanceSheet.setConditionalFormatRules(rules);
-}
-   
-    
-     // 残業NGの日は定時でカット
-     if (!allowOverToday && staff.endMinutes != null && endMinutes != null) {
-     if (endMinutes > staff.endMinutes) {
-    endMinutes = staff.endMinutes;
-     }
-     }
+      // 残業NGの日は「定時」でカット（定時が設定されている場合）
+      if (!allowOverToday && staff.endMinutes != null && endMinutes != null) {
+        if (endMinutes > staff.endMinutes) endMinutes = staff.endMinutes;
+      }
 
-      // ==== 出勤・退勤が確定したあと ====
-     const rawWorkMinutes = endMinutes - startMinutes;
+      // ==== 休憩（時間のみ管理）====
+      // 休憩が受信ログに入ってればそれを優先。
+      // なければ、労働が6時間未満→0分 / 6時間以上→60分
+      let restStr;
+      let restMinutes;
 
-     // ==== 休憩（時間のみ管理）====
-     let restMinutes;
-     let restStr;
-     
-     if (rec.rest) {
-     restMinutes = toMinutes(rec.rest);
-     restStr = rec.rest;
-     } else {
-      if (rawWorkMinutes < 360) {
-     restMinutes = 0;
-     restStr = "0:00";
+      if (rec.rest) {
+        restStr = rec.rest;
+        restMinutes = toMinutes(restStr);
       } else {
-     restMinutes = 60;   // ← 規則で決めた時間
-     restStr = "1:00";
+        if (startMinutes != null && endMinutes != null && (endMinutes - startMinutes) < 360) {
+          restStr = "0:00";
+          restMinutes = 0;
+        } else {
+          restStr = "1:00";
+          restMinutes = 60;
         }
       }
 
@@ -330,7 +313,7 @@ if (lastRow > 1) {
         workMinutes = Math.max(0, endMinutes - startMinutes - restMinutes);
       }
 
-      // ==== 金額 ====
+      // ==== 金額（8時間超は1.25）====
       const normal = Math.min(workMinutes, 480);
       const over   = Math.max(0, workMinutes - 480);
 
@@ -338,40 +321,43 @@ if (lastRow > 1) {
         (normal / 60 * staff.wage) +
         (over / 60 * staff.wage * 1.25);
 
-      // ==== 表示 ====
-      const startStr = startMinutes != null ? minutesToHHMM(startMinutes) : "";
-      const endStr   = endMinutes   != null ? minutesToHHMM(endMinutes)   : "";
-      let warning = "";
-      if (rec.allowOver === "OK" && workMinutes <= 480) {
-      warning = "⚠ OKだが残業なし";
-      }
-
       rows.push([
         rec.date,
         staff.id,
-        staff.name,       // ← 漢字名（ここが今回の重要点）
-        startStr,
-        endStr,
+        staff.name,
+        startMinutes != null ? minutesToHHMM(startMinutes) : "",
+        endMinutes   != null ? minutesToHHMM(endMinutes)   : "",
         minutesToHHMM(workMinutes),
         money,
         restStr,
-        rec.allowOver,
-        warning
+        rec.allowOver || ""
       ]);
     });
 
     // ===== 出力 =====
     if (rows.length) {
-      attendanceSheet.getRange(2,1,rows.length,10).setValues(rows);
-      attendanceSheet.getRange(2,6,rows.length,1).setNumberFormat("[h]:mm");//労働時間
-      attendanceSheet.getRange(2,7,rows.length,1).setNumberFormat("¥#,##0");//金額
-      attendanceSheet.getRange(2,8,rows.length,1).setNumberFormat("[h]:mm"); // 休憩
+      attendanceSheet.getRange(2, 1, rows.length, 9).setValues(rows);
+      attendanceSheet.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm"); // 労働時間
+      attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0"); // 金額
+      attendanceSheet.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm"); // 休憩
+
+      // 「残業許可=OK」だけ薄赤（※毎回ルールを増やさないように、いったん置き換え）
+      const lastRow = attendanceSheet.getLastRow();
+      const rangeI = attendanceSheet.getRange(2, 9, Math.max(0, lastRow - 1), 1);
+
+      const rule = SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo("OK")
+        .setBackground("#ffd6d6")
+        .setRanges([rangeI])
+        .build();
+
+      attendanceSheet.setConditionalFormatRules([rule]);
     }
 
-    Logger.log("✅ 勤怠記録 更新OK（名前・丸め対応）");
+    Logger.log("✅ 勤怠記録 更新OK（残業OKは受信ログ管理）");
 
   } catch (err) {
-    Logger.log("💥 updateAttendanceSheet ERROR: " + err);
+    Logger.log("💥 updateAttendanceSheet ERROR: " + (err.stack || err));
   }
 }
 
