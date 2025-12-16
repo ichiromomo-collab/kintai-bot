@@ -359,7 +359,7 @@ function updateAttendanceSheet() {
      .whenFormulaSatisfied(
       '=OR(AND($D2="", $E2<>""), AND($D2<>"", $E2=""))'
      )
-     .setBackground("#F44646 ") // 警告赤
+     .setBackground("#F46A6A ") // 警告赤
      .setRanges([sheet.getRange(`D2:E${lastRow}`)])
      .build()
      );
