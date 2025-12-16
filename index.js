@@ -356,7 +356,7 @@ function updateAttendanceSheet() {
       // ========= ① 時間が入っているセル → 薄緑 =========
      const timeGreen = "#e6f4ea";
 
-      ["D","E","H"].forEach(col => {
+      ["D","E"].forEach(col => {
       rules.push(
       SpreadsheetApp.newConditionalFormatRule()
         .whenFormulaSatisfied(`=AND(${col}2<>"",${col}2<>0)`)
@@ -387,7 +387,7 @@ function updateAttendanceSheet() {
       rules.push(
      SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied('=$H2>=TIME(1,0,0)')
-      .setBackground("#f4cccc") // 濃赤
+      .setBackground("#F48383") // 濃赤
       .setRanges([sheet.getRange(2, 8, dataRows, 1)])
       .build()
       );
@@ -395,7 +395,7 @@ function updateAttendanceSheet() {
       rules.push(
       SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied('=AND($H2>0,$H2<TIME(1,0,0))')
-      .setBackground("#fce5cd") // 薄赤
+      .setBackground("#F4B4B4") // 薄赤
       .setRanges([sheet.getRange(2, 8, dataRows, 1)])
       .build()
        );
