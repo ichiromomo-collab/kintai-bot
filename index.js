@@ -353,6 +353,17 @@ function updateAttendanceSheet() {
      const rules = [];
      const dataRows = Math.max(1, lastRow - 1);
 
+     // ========= ① 出勤 or 退勤が片方欠けていたら警告（赤） =========
+     rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+     .whenFormulaSatisfied(
+      '=OR(AND($D2="", $E2<>""), AND($D2<>"", $E2=""))'
+     )
+     .setBackground("#F44646 ") // 警告赤
+     .setRanges([sheet.getRange(`D2:E${lastRow}`)])
+     .build()
+     );
+
       // ========= ① 時間が入っているセル → 薄緑 =========
      const timeGreen = "#e6f4ea";
 
