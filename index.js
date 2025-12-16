@@ -340,16 +340,17 @@ function updateAttendanceSheet() {
       attendanceSheet.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm"); // 労働時間
       attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0"); // 金額
       attendanceSheet.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm"); // 休憩
+    }
 
      // ← ここで色付け復活
      // ===== 勤怠記録の色付け（段階グラデーション風） =====
-    function applyAttendanceFormatting(sheet, lastRow) {
+     function applyAttendanceFormatting(sheet) {
+     const lastRow = sheet.getLastRow();
+     if (lastRow < 2) return;
 
      // 既存ルール全削除（重複防止）
      sheet.setConditionalFormatRules([]);
-
      const rules = [];
-
      const dataRows = Math.max(1, lastRow - 1);
 
       // ========= ① 時間が入っているセル → 薄緑 =========
@@ -424,7 +425,9 @@ function updateAttendanceSheet() {
         .build();
 
       attendanceSheet.setConditionalFormatRules([rule]);
-    }
+      applyAttendanceFormatting(attendanceSheet);
+
+    
 
      Logger.log("✅ 勤怠記録 更新OK（残業OKは受信ログ管理）");
 
