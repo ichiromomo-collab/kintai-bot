@@ -434,11 +434,11 @@ function updateAttendanceSheet() {
       .build()
       );
 
-      // ========= ⑤ 早出の日 → 出勤セルをオレンジ =========
+      // ========= ⑤ 早出の日 → 出勤セルを色付け =========
      rules.push(
      SpreadsheetApp.newConditionalFormatRule()
      .whenFormulaSatisfied('=AND($J2="OK",$D2<>"")')
-     .setBackground("#f9cb9c") // 🟧 やさしめオレンジ
+     .setBackground("#F6ADC6") // 
      .setRanges([sheet.getRange(`J2:J${lastRow}`)])
      .build()
      );
@@ -446,9 +446,7 @@ function updateAttendanceSheet() {
      sheet.setConditionalFormatRules(rules);
      }
 
-    
-
-      // 「残業許可=OK」だけ薄赤（※毎回ルールを増やさないように、いったん置き換え）
+      // 「残業許可=OK」だけ色付け（※毎回ルールを増やさないように、いったん置き換え）
       const lastRow = attendanceSheet.getLastRow();
       const rangeI = attendanceSheet.getRange(2, 9, Math.max(0, lastRow - 1), 1);
 
