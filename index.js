@@ -229,14 +229,14 @@ function updateAttendanceSheet() {
 
     // ===== 受信ログを集約（同一日付＋同一ID）=====
     // 受信ログの列想定：
-    // [ts, id, action, dateStr, timeStr, restStr, allowOver]
+    // [ts, id, action, dateStr, timeStr, restStr, allowOver, early]
     const logs = logSheet.getDataRange().getValues();
     logs.shift();
 
     const map = new Map();
 
     logs.forEach(row => {
-      const [ts, id, action, dateStr, timeStr, restStr, allowOver] = row;
+      const [ts, id, action, dateStr, timeStr, restStr, allowOver, early] = row;
       if (!id || !dateStr || !timeStr) return;
 
       const key = `${dateStr}_${String(id).trim()}`;
@@ -246,7 +246,8 @@ function updateAttendanceSheet() {
         in: "",
         out: "",
         rest: "",
-        allowOver: ""   // ← 受信ログで保持
+        allowOver: "" , //残業
+        early: "" //早出
       };
 
       if (action === "punch_in")  obj.in  = timeStr;
@@ -254,13 +255,14 @@ function updateAttendanceSheet() {
 
       if (restStr) obj.rest = restStr;
       if (allowOver) obj.allowOver = String(allowOver).trim(); // "OK" 想定
+      if (early) obj.early = String(early).trim();
 
       map.set(key, obj);
     });
 
     // ===== 勤怠記録 初期化（ここは消してOK。入力は受信ログだから問題なし）=====
     attendanceSheet.clearContents();
-    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可"]);
+    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可"," 早出"]);
 
     const rows = [];
 
@@ -271,11 +273,22 @@ function updateAttendanceSheet() {
       const pressedStart = rec.in ? toMinutes(rec.in) : null;
       const pressedEnd   = rec.out ? toMinutes(rec.out) : null;
 
-      // ==== 出勤丸め ====
-      let startMinutes = pressedStart;
-      if (pressedStart != null && staff.startMinutes != null) {
-        if (pressedStart < staff.startMinutes) startMinutes = staff.startMinutes;
+      // ==== 出勤時間決定 ====
+     let startMinutes = pressedStart;
+
+     // 早出OKなら実打刻を採用
+     if (rec.early === "OK") {
+       startMinutes = pressedStart;
+     }
+     // 早出でなければ丸め
+     else if (
+     pressedStart != null &&
+     staff.startMinutes != null &&
+      pressedStart < staff.startMinutes
+     ) {
+       startMinutes = staff.startMinutes;
       }
+
 
       // ==== 退勤 ====
       let endMinutes = pressedEnd;
@@ -330,13 +343,14 @@ function updateAttendanceSheet() {
         minutesToHHMM(workMinutes),
         money,
         restStr,
-        rec.allowOver || ""
+        rec.allowOver || "",
+         rec.early || "" 
       ]);
     });
 
     // ===== 出力 =====
     if (rows.length) {
-      attendanceSheet.getRange(2, 1, rows.length, 9).setValues(rows);
+      attendanceSheet.getRange(2, 1, rows.length, 10).setValues(rows);
       attendanceSheet.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm"); // 労働時間
       attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0"); // 金額
       attendanceSheet.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm"); // 休憩
@@ -415,10 +429,19 @@ function updateAttendanceSheet() {
       rules.push(
      SpreadsheetApp.newConditionalFormatRule()
       .whenTextEqualTo("OK")
-      .setBackground("#ffd6d6")
+      .setBackground("#66C4FF")
       .setRanges([sheet.getRange(2, 9, dataRows, 1)])
       .build()
       );
+
+      // ========= ⑤ 早出の日 → 出勤セルをオレンジ =========
+     rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+     .whenFormulaSatisfied('=AND($J2="OK",$D2<>"")')
+     .setBackground("#f9cb9c") // 🟧 やさしめオレンジ
+     .setRanges([sheet.getRange(`J2:J${lastRow}`)])
+     .build()
+     );
 
      sheet.setConditionalFormatRules(rules);
      }
