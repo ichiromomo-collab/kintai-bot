@@ -564,6 +564,12 @@ function minutesToHHMM(min) {
 
     const name = obj.name;
     const rows = obj.rows;
+    let oncallCount = 0;
+    
+    rows.forEach(r => {
+    const oncall = r[10]; // K列（オンコール）
+    if (oncall === "OK") oncallCount++;
+   });
 
     const sheetName = `${name}_${year}${String(month).padStart(2, "0")}`;
 
@@ -607,6 +613,18 @@ function minutesToHHMM(min) {
         ` - TIME(8,0,0) * COUNT(FILTER(F2:F${rows.length + 1}, F2:F${rows.length + 1} > TIME(8,0,0)))`
       )
       .setNumberFormat("[h]:mm");
+
+      //オンコール回数
+      const oncallRow = moneyRow + 1;
+
+     sh.getRange(oncallRow, 3).setValue("オンコール回数");
+     sh.getRange(oncallRow, 6).setValue(oncallCount + " 回");
+
+     sh.getRange(oncallRow + 1, 3).setValue("オンコール手当");
+     sh.getRange(oncallRow + 1, 7)
+     .setValue(oncallCount * 5000)
+     .setNumberFormat("¥#,##0");
+
 
     // ===== 勤務金額 合計 =====
     const moneyRow = totalRow + 2;
