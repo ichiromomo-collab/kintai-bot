@@ -37,33 +37,6 @@ function sendButton() {
   Logger.log("Slack response: " + response.getContentText());
 }
 
-// ===== Slackにボタン送信（テスト用） =====
-function sendButton() {
-  const message = {
-    channel: CHANNEL_ID,
-    text: "出勤・退勤ボタンを押してください！",
-    attachments: [
-      {
-        text: "選択してください",
-        fallback: "ボタンが表示されません",
-        callback_id: "attendance",
-        color: "#36a64f",
-        attachment_type: "default",
-        actions: [
-          { name: "punch_in", text: "出勤", type: "button", style: "primary" },
-          { name: "punch_out", text: "退勤", type: "button", style: "danger" }
-        ]
-      }
-    ]
-  };
-
-  UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
-    method: "post",
-    contentType: "application/json",
-    headers: { Authorization: "Bearer " + SLACK_BOT_TOKEN },
-    payload: JSON.stringify(message)
-  });
-}
 
 // ===== SlackからのPOSTを受け取る =====
 function doPost(e) {
@@ -100,14 +73,18 @@ function doPost(e) {
 
     const action   = payload.actions?.[0]?.action_id || payload.actions?.[0]?.name || "";
     const userName = payload.user?.username || payload.user?.name || payload.user?.id || "unknown";
-
-    Logger.log(`👤 ${userName} - action=${action}`);
+    const labelMap = {
+   punch_in: "出勤",
+   punch_out: "退勤",
+   oncall: "オンコール"
+   };
+   const label = labelMap[action] || action;
 
     // Slackに即レス（ボタン押し確認）
-    const resp = {
-      response_type: "in_channel",
-      replace_original: false,
-      text: `✅ ${userName} さんが「${action === "punch_in" ? "出勤" : "退勤"}」を押しました！`,
+   const resp = {
+   response_type: "in_channel",
+   replace_original: false,
+     text: `✅ ${userName} さんが「${label}」を押しました！`,
     };
 
     const output = ContentService.createTextOutput(JSON.stringify(resp))
