@@ -439,7 +439,7 @@ function updateAttendanceSheet() {
      SpreadsheetApp.newConditionalFormatRule()
      .whenTextEqualTo("OK")
      .setBackground("#d9e1f2") // 薄い青
-     .setRanges([sheet.getRange(2, 10, dataRows, 1)])
+     .setRanges([sheet.getRange(2, 11, dataRows, 1)])
      .build()
      );
 
