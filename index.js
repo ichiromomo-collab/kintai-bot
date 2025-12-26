@@ -320,7 +320,7 @@ function updateAttendanceSheet() {
 
       const money =
         (normal / 60 * staff.wage) +
-        (over / 60 * staff.wage * 1.25);
+        (over / 60 * staff.wage * 1.25) +
        oncallFee;
        
 
@@ -334,13 +334,14 @@ function updateAttendanceSheet() {
         money,
         restStr,
         rec.allowOver || "",
-         rec.early || "" 
+         rec.early || "" ,
+         rec.oncall|| ""
       ]);
     });
 
     // ===== 出力 =====
     if (rows.length) {
-      attendanceSheet.getRange(2, 1, rows.length, 10).setValues(rows);
+      attendanceSheet.getRange(2, 1, rows.length, 11).setValues(rows);
       attendanceSheet.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm"); // 労働時間
       attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0"); // 金額
       attendanceSheet.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm"); // 休憩
