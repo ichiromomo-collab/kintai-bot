@@ -224,11 +224,14 @@ function updateAttendanceSheet() {
         out: "",
         rest: "",
         allowOver: "" , //残業
-        early: "" //早出
+        early: "" ,//早出
+        oncall:""//オンコール
       };
 
       if (action === "punch_in")  obj.in  = timeStr;
       if (action === "punch_out") obj.out = timeStr;
+      if (action === "oncall") obj.oncall = "OK";
+
 
       if (restStr) obj.rest = restStr;
       if (allowOver) obj.allowOver = String(allowOver).trim(); // "OK" 想定
@@ -239,7 +242,7 @@ function updateAttendanceSheet() {
 
     // ===== 勤怠記録 初期化（ここは消してOK。入力は受信ログだから問題なし）=====
     attendanceSheet.clearContents();
-    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可"," 早出"]);
+    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可"," 早出","オンコール"]);
 
     const rows = [];
 
@@ -303,6 +306,14 @@ function updateAttendanceSheet() {
         workMinutes = Math.max(0, endMinutes - startMinutes - restMinutes);
       }
 
+     // ==== オンコール手当 ====
+        const ONCALL_FEE = 5000;
+        let oncallFee = 0;
+
+       if (rec.oncall === "OK") {
+       oncallFee = ONCALL_FEE;
+       }
+
       // ==== 金額（8時間超は1.25）====
       const normal = Math.min(workMinutes, 480);
       const over   = Math.max(0, workMinutes - 480);
@@ -310,8 +321,10 @@ function updateAttendanceSheet() {
       const money =
         (normal / 60 * staff.wage) +
         (over / 60 * staff.wage * 1.25);
+       oncallFee;
+       
 
-      rows.push([
+       rows.push([
         rec.date,
         staff.id,
         staff.name,
@@ -419,6 +432,16 @@ function updateAttendanceSheet() {
      .setRanges([sheet.getRange(`J2:J${lastRow}`)])
      .build()
      );
+
+     // ========= オンコール（J列） =========
+     rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+     .whenTextEqualTo("OK")
+     .setBackground("#d9e1f2") // 薄い青
+     .setRanges([sheet.getRange(2, 10, dataRows, 1)])
+     .build()
+     );
+
 
      sheet.setConditionalFormatRules(rules);
      }
@@ -550,7 +573,7 @@ function minutesToHHMM(min) {
     const sh = ss.insertSheet(sheetName);
 
     // ヘッダー
-    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩","残業許可","警告"]);
+    sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩","残業許可","早出","オンコール"]);
 
     // 本文
     sh.getRange(2, 1, rows.length, 8).setValues(rows);
