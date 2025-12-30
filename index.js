@@ -638,7 +638,7 @@ function minutesToHHMM(min) {
 
      Logger.log(`📄 作成: ${sheetName}`);
      });
-    }
+     }
      // ===== 月次シート用：ストライプ＆合計強調 =====
      function applyStripeFormatting(sheet) {
      const lastRow = sheet.getLastRow();
@@ -646,27 +646,28 @@ function minutesToHHMM(min) {
 
      const rules = [];
 
-     // 偶数行ストライプ
-     rules.push(
-     SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=ISODD(ROW())')
+      // ① ストライプ（※合計行は除外）
+      rules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(
+        '=AND(ISODD(ROW()), $C2<>"【合計】")'
+      )
       .setBackground('#CDE6C7')
-      .setRanges([sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn())])
+      .setRanges([sheet.getRange(2, 1, lastRow - 1, lastCol)])
       .build()
      );
 
-      // 【合計】行を強調
+     // ② 合計行を最優先で強調（一番最後）
      rules.push(
      SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=$C1="【合計】"')
-      .setBackground('#fff2cc')
+      .whenFormulaSatisfied('=$C2="【合計】"')
+      .setBackground('#FFF2CC')
       .setBold(true)
-      .setRanges([sheet.getRange(1, 1, lastRow, sheet.getLastColumn())])
+      .setRanges([sheet.getRange(1, 1, lastRow, lastCol)])
       .build()
-     );
-    
-     sheet.setConditionalFormatRules(rules);
-     
+      );
+
+      sheet.setConditionalFormatRules(rules);
 
       Logger.log("🎉 個人シート（年月指定対応） 完成！");
      }
