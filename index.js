@@ -633,7 +633,9 @@ function minutesToHHMM(min) {
      sh.getRange(oncallRow + 1, 7)
      .setValue(oncallCount * 5000)
      .setNumberFormat("¥#,##0");
-  
+     
+     applyStripeFormatting(sh);
+
      Logger.log(`📄 作成: ${sheetName}`);
      });
      // ===== 月次シート用：ストライプ＆合計強調 =====
@@ -662,6 +664,8 @@ function minutesToHHMM(min) {
       .build()
   );
   }
+  applyStripeFormatting(sh);
+
 
       Logger.log("🎉 個人シート（年月指定対応） 完成！");
     }
