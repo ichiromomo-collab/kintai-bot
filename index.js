@@ -646,6 +646,16 @@ function minutesToHHMM(min) {
 
      const lastCol = sheet.getLastColumn(); 
      const rules = [];
+     
+     // 0️⃣ タイトル行（1行目）を固定で色付け
+     rules.push(
+     SpreadsheetApp.newConditionalFormatRule()
+     .whenFormulaSatisfied('=ROW()=1')
+     .setBackground('#F6ADC6')   // ← 好きな色に変えてOK
+     .setBold(true)
+     .setRanges([sheet.getRange(1, 1, 1, lastCol)])
+     .build()
+     );
 
       // ① ストライプ（※合計行は除外）
       rules.push(
