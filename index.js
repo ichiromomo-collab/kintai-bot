@@ -664,7 +664,7 @@ function minutesToHHMM(min) {
       .whenFormulaSatisfied('=$C2="【合計】"')
       .setBackground('#FFF2CC')
       .setBold(true)
-      .setRanges([sheet.getRange(1, 1, lastRow, lastCol)])
+      .setRanges([sheet.getRange(2, 1, lastRow, lastCol)])
       .build()
       );
 
