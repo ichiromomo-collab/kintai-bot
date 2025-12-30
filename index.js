@@ -649,8 +649,8 @@ function minutesToHHMM(min) {
      // 偶数行ストライプ
      rules.push(
      SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=ISEVEN(ROW())')
-      .setBackground('#f5f5f5')
+      .whenFormulaSatisfied('=ISODD(ROW())')
+      .setBackground('#CDE6C7')
       .setRanges([sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn())])
       .build()
      );
@@ -661,7 +661,7 @@ function minutesToHHMM(min) {
       .whenFormulaSatisfied('=$C2="【合計】"')
       .setBackground('#fff2cc')
       .setBold(true)
-      .setRanges([sheet.getRange(1, 1, lastRow, sheet.getLastColumn())])
+      .setRanges([sheet.getRange(1, 1, lastRow - 1, sheet.getLastColumn())])
       .build()
      );
     
