@@ -633,8 +633,11 @@ function minutesToHHMM(min) {
      sh.getRange(oncallRow + 1, 7)
      .setValue(oncallCount * 5000)
      .setNumberFormat("¥#,##0");
-
-      function applyStripeFormatting(sheet) {
+  
+     Logger.log(`📄 作成: ${sheetName}`);
+     });
+     // ===== 月次シート用：ストライプ＆合計強調 =====
+     function applyStripeFormatting(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
@@ -649,7 +652,7 @@ function minutesToHHMM(min) {
       .build()
   );
 
-  // 合計行を強調
+  // 【合計】行を強調
   rules.push(
     SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied('=$C2="【合計】"')
@@ -658,15 +661,7 @@ function minutesToHHMM(min) {
       .setRanges([sheet.getRange(1, 1, lastRow, sheet.getLastColumn())])
       .build()
   );
-
-  sheet.setConditionalFormatRules(rules);
-}
-
- 
-
-
-     Logger.log(`📄 作成: ${sheetName}`);
-     });
+  }
 
       Logger.log("🎉 個人シート（年月指定対応） 完成！");
     }
