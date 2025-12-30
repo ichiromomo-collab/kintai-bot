@@ -644,6 +644,7 @@ function minutesToHHMM(min) {
      const lastRow = sheet.getLastRow();
      if (lastRow < 2) return;
 
+     const lastCol = sheet.getLastColumn(); 
      const rules = [];
 
       // ① ストライプ（※合計行は除外）
