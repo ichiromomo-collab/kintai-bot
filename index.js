@@ -651,7 +651,7 @@ function minutesToHHMM(min) {
      rules.push(
      SpreadsheetApp.newConditionalFormatRule()
      .whenFormulaSatisfied('=ROW()=1')
-     .setBackground('#F6ADC6')   // ← 好きな色に変えてOK
+     .setBackground('#F6DEE6')   // ← 好きな色に変えてOK
      .setBold(true)
      .setRanges([sheet.getRange(1, 1, 1, lastCol)])
      .build()
