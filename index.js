@@ -583,7 +583,7 @@ function minutesToHHMM(min) {
     sh.appendRow(["日付", "ID", "名前", "出勤", "退勤", "労働時間", "勤務金額", "休憩","残業許可","早出","オンコール"]);
 
     // 本文
-    sh.getRange(2, 1, rows.length, 8).setValues(rows);
+    sh.getRange(2, 1, rows.length, 11).setValues(rows);
 
     // ===== 自動フォーマット =====
     sh.getRange(2, 4, rows.length, 1).setNumberFormat("h:mm");     // 出勤
@@ -614,6 +614,15 @@ function minutesToHHMM(min) {
       )
       .setNumberFormat("[h]:mm");
 
+    // ===== 勤務金額 合計 =====
+    const moneyRow = totalRow + 2;
+    sh.getRange(moneyRow, 3).setValue("勤務金額 合計");
+
+    sh.getRange(moneyRow, 7)
+      .setFormula(`=SUM(G2:G${rows.length + 1})`)
+      .setNumberFormat("¥#,##0");
+
+
       //オンコール回数
       const oncallRow = moneyRow + 1;
 
@@ -625,17 +634,38 @@ function minutesToHHMM(min) {
      .setValue(oncallCount * 5000)
      .setNumberFormat("¥#,##0");
 
+      function applyStripeFormatting(sheet) {
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 2) return;
 
-    // ===== 勤務金額 合計 =====
-    const moneyRow = totalRow + 2;
-    sh.getRange(moneyRow, 3).setValue("勤務金額 合計");
+       const rules = sheet.getConditionalFormatRules() || [];
 
-    sh.getRange(moneyRow, 7)
-      .setFormula(`=SUM(G2:G${rows.length + 1})`)
-      .setNumberFormat("¥#,##0");
+     // 偶数行ストライプ
+      rules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=ISEVEN(ROW())')
+      .setBackground('#f5f5f5') // 薄グレー
+      .setRanges([sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn())])
+      .build()
+      );
 
-    Logger.log(`📄 作成: ${sheetName}`);
-  });
+     // 合計行を強調
+    rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=$C1="【合計】"')
+      .setBackground('#fff2cc') // 薄黄色
+      .setBold(true)
+      .setRanges([sheet.getRange(1, 1, lastRow, sheet.getLastColumn())])
+      .build()
+      );
 
-  Logger.log("🎉 個人シート（年月指定対応） 完成！");
-}
+     sheet.setConditionalFormatRules(rules);
+     }
+ 
+
+
+     Logger.log(`📄 作成: ${sheetName}`);
+     });
+
+      Logger.log("🎉 個人シート（年月指定対応） 完成！");
+    }
