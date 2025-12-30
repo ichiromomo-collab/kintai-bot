@@ -658,10 +658,10 @@ function minutesToHHMM(min) {
       // 【合計】行を強調
      rules.push(
      SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=$C2="【合計】"')
+      .whenFormulaSatisfied('=$C1="【合計】"')
       .setBackground('#fff2cc')
       .setBold(true)
-      .setRanges([sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn())])
+      .setRanges([sheet.getRange(1, 1, lastRow, sheet.getLastColumn())])
       .build()
      );
     
