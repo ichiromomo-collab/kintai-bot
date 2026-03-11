@@ -4,7 +4,7 @@ const CHANNEL_ID      = PropertiesService.getScriptProperties().getProperty("CHA
 const LOG_SHEET       = "受信ログ";
 const SPREADSHEET_ID  = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
 
-const OVERTIME_CHANNEL  = "C098HMJV3AB";
+const OVERTIME_CHANNEL = PropertiesService.getScriptProperties().getProperty("OVERTIME_CHANNEL");
 const OVERTIME_SHEET    = "残業申請ログ";
 const SCHEDULE_SHEET_OT = "スケジュール";
 const MANAGER_ID_1      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_1");
