@@ -1792,11 +1792,11 @@ function parseAndWriteSchedule(docId) {
   } else {
     Logger.log("⚠ テーブルデータが取得できませんでした");
   }
- function testSimplePost() {
+  function testSimplePost() {
   const result = callSlackApi("chat.postMessage", {
     channel: TODAY_CHANNEL,
     text: "テスト投稿"
   });
   Logger.log(JSON.stringify(result));
-}   
+}
 }
