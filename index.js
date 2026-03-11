@@ -4,6 +4,7 @@ const CHANNEL_ID      = PropertiesService.getScriptProperties().getProperty("CHA
 const LOG_SHEET       = "受信ログ";
 const SPREADSHEET_ID  = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
 
+const ATTENDANCE_LOG_SHEET = "勤怠確認ログ";
 const OVERTIME_CHANNEL  = "C09946WKPDE";
 const OVERTIME_SHEET    = "残業申請ログ";
 const SCHEDULE_SHEET_OT = "スケジュール";
@@ -139,6 +140,8 @@ ${dateStr} の勤怠打刻を確認しました。` }
 ${dateStr} の勤怠打刻が未完了です。管理者に連絡済み。` }
         }]
       });
+      // ログ記録
+      logAttendanceCheck(staffName, dateStr, "できてません");
       handleAttendanceNG(payload);
       return ContentService.createTextOutput(JSON.stringify({ text: "" }))
         .setMimeType(ContentService.MimeType.JSON);
@@ -512,6 +515,18 @@ function setupOvertimeSheet() {
   }
 }
 
+
+// ===== 勤怠確認ログシート初期設定（初回のみ実行） =====
+function setupAttendanceLogSheet() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(ATTENDANCE_LOG_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(ATTENDANCE_LOG_SHEET);
+    sheet.appendRow(["対象日", "スタッフ名", "回答", "回答日時"]);
+    sheet.setFrozenRows(1);
+    Logger.log("✅ 勤怠確認ログシート作成完了");
+  }
+}
 
 // ===== 毎朝8時トリガー：残業チェック＆未申請警告 =====
 function dailyOvertimeCheck() {
@@ -1117,4 +1132,23 @@ function handleAttendanceNG(payload) {
   });
 
   Logger.log(`⚠️ 勤怠未打刻報告: ${staffName} / ${dateStr}`);
+}
+
+
+// ===== 勤怠確認ログ記録 =====
+function logAttendanceCheck(staffName, dateStr, answer) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet = ss.getSheetByName(ATTENDANCE_LOG_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(ATTENDANCE_LOG_SHEET);
+      sheet.appendRow(["対象日", "スタッフ名", "回答", "回答日時"]);
+      sheet.setFrozenRows(1);
+    }
+    const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm");
+    sheet.appendRow([dateStr, staffName, answer, nowStr]);
+    Logger.log(`✅ 勤怠確認ログ記録: ${staffName} / ${answer}`);
+  } catch(err) {
+    Logger.log("💥 logAttendanceCheck ERROR: " + err);
+  }
 }
