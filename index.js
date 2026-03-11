@@ -1712,8 +1712,9 @@ function importKaipokePDF() {
   const text = doc.getBody().getText();
   Logger.log("📝 テキスト取得完了 (" + text.length + "文字)");
 
-  // 変換したドキュメントを削除（不要なので）
-  DriveApp.getFileById(docId).setTrashed(true);
+  // 変換したドキュメントは確認用に残す（確認後に手動削除してください）
+  // DriveApp.getFileById(docId).setTrashed(true);
+  Logger.log("📄 変換ドキュメントID: " + docId);
 
   // テキスト解析してスケジュール詳細シートに書き込む
   parseAndWriteSchedule(text);
