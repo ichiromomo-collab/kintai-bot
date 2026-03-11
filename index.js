@@ -739,7 +739,9 @@ function handleOvertimeSubmit(payload) {
     overtimeSheet.getRange(rowIndex, 7).setValue("申請済");
     overtimeSheet.getRange(rowIndex, 8).setValue(reason);
     overtimeSheet.getRange(rowIndex, 9).setValue(nowStr);
-    appliedDates.push(overtimeSheet.getRange(rowIndex, 1).getValue());
+    const dateVal = overtimeSheet.getRange(rowIndex, 1).getValue();
+    const dateFormatted = dateVal instanceof Date ? Utilities.formatDate(dateVal, "Asia/Tokyo", "yyyy/MM/dd") : String(dateVal);
+    appliedDates.push(dateFormatted);
   });
 
   callSlackApi("chat.postMessage", {
@@ -818,6 +820,10 @@ function minutesToHHMM(min) {
 
 function timeToMinutes(timeStr) {
   if (!timeStr) return 0;
+  // DateオブジェクトはGoogleスプレッドシートが時刻として認識している場合
+  if (timeStr instanceof Date) {
+    return timeStr.getHours() * 60 + timeStr.getMinutes();
+  }
   const [h, m] = String(timeStr).split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
 }
