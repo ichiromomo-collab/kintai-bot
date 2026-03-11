@@ -109,9 +109,8 @@ function doPost(e) {
 
     // --- 勤怠確認：できてます ---
     if (action === "attendance_ok") {
-      // 何もしない（記録のみ不要）
-      return ContentService.createTextOutput(JSON.stringify({ text: "" }))
-        .setMimeType(ContentService.MimeType.JSON);
+      return ContentService.createTextOutput("")
+        .setMimeType(ContentService.MimeType.TEXT);
     }
 
     // --- 勤怠確認：できてません ---
@@ -219,7 +218,9 @@ function checkOvertimeOnPunchOut(ss, userName, dateStr, punchOutTime) {
       if (String(row[0]).trim() !== staffName) return;
       const convertedDate = convertScheduleDateToYMD(String(row[1]).trim(), today.getFullYear());
       if (convertedDate !== dateStr) return;
-      const end = String(row[3]).trim(), start = String(row[2]).trim();
+      const endRaw = row[3], startRaw = row[2];
+      const end   = endRaw   instanceof Date ? Utilities.formatDate(endRaw,   "Asia/Tokyo", "HH:mm") : String(endRaw).trim();
+      const start = startRaw instanceof Date ? Utilities.formatDate(startRaw, "Asia/Tokyo", "HH:mm") : String(startRaw).trim();
       if (!scheduleEndTime || end > scheduleEndTime) {
         scheduleEndTime = end; scheduleStartTime = start;
       }
@@ -515,8 +516,9 @@ function dailyOvertimeCheck() {
   scheduleData.forEach(row => {
     const staffName = String(row[0]).trim();
     const dateStr   = String(row[1]).trim();
-    const startTime = String(row[2]).trim();
-    const endTime   = String(row[3]).trim();
+    const startRaw2 = row[2], endRaw2 = row[3];
+    const startTime = startRaw2 instanceof Date ? Utilities.formatDate(startRaw2, "Asia/Tokyo", "HH:mm") : String(startRaw2).trim();
+    const endTime   = endRaw2   instanceof Date ? Utilities.formatDate(endRaw2,   "Asia/Tokyo", "HH:mm") : String(endRaw2).trim();
     staffMap.forEach((info, id) => {
       if (info.name === staffName) {
         const key = `${dateStr}_${id}`;
@@ -668,7 +670,8 @@ function handleScheduleAsIs(payload) {
   items.forEach(item => {
     overtimeSheet.getRange(item.rowIndex, 7).setValue("スケジュール通り");
     overtimeSheet.getRange(item.rowIndex, 9).setValue(nowStr);
-    updatedDates.push(overtimeSheet.getRange(item.rowIndex, 1).getValue());
+    const dv = overtimeSheet.getRange(item.rowIndex, 1).getValue();
+    updatedDates.push(dv instanceof Date ? Utilities.formatDate(dv, "Asia/Tokyo", "yyyy/MM/dd") : String(dv));
   });
 
   callSlackApi("chat.postMessage", {
@@ -1068,7 +1071,7 @@ function handleAttendanceNG(payload) {
       {
         type: "section",
         text: { type: "mrkdwn",
-          text: `⚠️ *勤怠修正申請が必要です*\n\n${dateStr} の打刻が未完了です。\n以下の内容を管理者（川畑さん・岩崎さん）にご連絡ください。\n\n📝 *連絡内容の例：*\n「${dateStr} の出勤／退勤時刻が〇〇:〇〇でした。理由も記入の上、マネーフォワードで修正申請をお願いします。」\n\n👉 <#${CHANNEL_ID}> または直接DMでご連絡ください。`
+          text: `⚠️ *勤怠修正申請が必要です*\n\n${dateStr} の打刻が未完了です。\n以下の内容を管理者（川畑さん・岩崎さん）にご連絡ください。\n\n📝 *連絡内容の例：*\n「${dateStr} の出勤／退勤時刻が〇〇:〇〇でした。修正をお願いします。」\n\n👉 <#${CHANNEL_ID}> または直接DMでご連絡ください。`
         }
       }
     ]
