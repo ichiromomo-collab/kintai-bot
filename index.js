@@ -4,7 +4,7 @@ const CHANNEL_ID      = PropertiesService.getScriptProperties().getProperty("CHA
 const LOG_SHEET       = "受信ログ";
 const SPREADSHEET_ID  = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
 
-const OVERTIME_CHANNEL = PropertiesService.getScriptProperties().getProperty("OVERTIME_CHANNEL");
+const OVERTIME_CHANNEL  = "C09946WKPDE";
 const OVERTIME_SHEET    = "残業申請ログ";
 const SCHEDULE_SHEET_OT = "スケジュール";
 const MANAGER_ID_1      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_1");
@@ -103,6 +103,20 @@ function doPost(e) {
     // --- 残業承認 ---
     if (action === "approve_overtime") {
       handleOvertimeApprove(payload);
+      return ContentService.createTextOutput(JSON.stringify({ text: "" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- 勤怠確認：できてます ---
+    if (action === "attendance_ok") {
+      // 何もしない（記録のみ不要）
+      return ContentService.createTextOutput(JSON.stringify({ text: "" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- 勤怠確認：できてません ---
+    if (action === "attendance_ng") {
+      handleAttendanceNG(payload);
       return ContentService.createTextOutput(JSON.stringify({ text: "" }))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -955,4 +969,125 @@ function applyStripeFormatting(sheet) {
 
   sheet.setConditionalFormatRules(rules);
   Logger.log("🎉 個人シート完成！");
+}
+
+
+// ===== 毎朝8時：昨日の勤怠確認ボタン送信 =====
+function dailyAttendanceCheck() {
+  const ss          = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const scheduleSheet = ss.getSheetByName(SCHEDULE_SHEET_OT);
+  const staffSheet    = ss.getSheetByName("スタッフマスタ");
+
+  if (!scheduleSheet || !staffSheet) {
+    Logger.log("⚠ シートが見つかりません"); return;
+  }
+
+  // 昨日の日付
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = Utilities.formatDate(yesterday, "Asia/Tokyo", "yyyy/MM/dd");
+  const yesterdayDisp = Utilities.formatDate(yesterday, "Asia/Tokyo", "M/d");
+
+  // スタッフマスタ読み込み
+  const staffData = staffSheet.getDataRange().getValues();
+  staffData.shift();
+  const staffMap = new Map();
+  staffData.forEach(([id, , , , name, slackUserId]) => {
+    if (id) staffMap.set(String(name).trim(), { id: String(id).trim(), slackUserId: slackUserId || "" });
+  });
+
+  // スケジュールシートから昨日勤務があったスタッフを取得
+  const scheduleData = scheduleSheet.getDataRange().getValues();
+  scheduleData.shift();
+  const workedStaff = new Set();
+
+  scheduleData.forEach(row => {
+    const staffName = String(row[0]).trim();
+    const dateStr   = convertScheduleDateToYMD(String(row[1]).trim(), yesterday.getFullYear());
+    if (dateStr === yesterdayStr) workedStaff.add(staffName);
+  });
+
+  if (workedStaff.size === 0) {
+    Logger.log("昨日の勤務者なし"); return;
+  }
+
+  // 対象スタッフごとにボタン送信
+  workedStaff.forEach(staffName => {
+    const staff = staffMap.get(staffName);
+    if (!staff) return;
+
+    callSlackApi("chat.postMessage", {
+      channel: CHANNEL_ID,
+      text: `📋 ${staffName} さん、昨日の勤怠確認`,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn",
+            text: `📋 *${staffName} さんへ*\n\n昨日（${yesterdayDisp}）の勤怠打刻はできていますか？`
+          }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "✅ できてます", emoji: true },
+              style: "primary",
+              action_id: "attendance_ok",
+              value: JSON.stringify({ staffName, staffId: staff.id, dateStr: yesterdayStr })
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "❌ できてません", emoji: true },
+              style: "danger",
+              action_id: "attendance_ng",
+              value: JSON.stringify({ staffName, staffId: staff.id, dateStr: yesterdayStr })
+            }
+          ]
+        }
+      ]
+    });
+  });
+
+  Logger.log(`✅ 勤怠確認ボタン送信完了: ${workedStaff.size}名`);
+}
+
+
+// ===== 「できてません」ボタン処理 =====
+function handleAttendanceNG(payload) {
+  const { staffName, staffId, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+  const presserName = payload.user?.name || payload.user?.username || "unknown";
+  const presserUserId = payload.user?.id || "";
+
+  // 押した本人にだけephemeralで修正申請の案内を送る
+  callSlackApi("chat.postEphemeral", {
+    channel: CHANNEL_ID,
+    user: presserUserId,
+    text: "勤怠修正申請のご案内",
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn",
+          text: `⚠️ *勤怠修正申請が必要です*\n\n${dateStr} の打刻が未完了です。\n以下の内容を管理者（川畑さん・岩崎さん）にご連絡ください。\n\n📝 *連絡内容の例：*\n「${dateStr} の出勤／退勤時刻が〇〇:〇〇でした。理由も記入の上、マネーフォワードで修正申請をお願いします。」\n\n👉 <#${CHANNEL_ID}> または直接DMでご連絡ください。`
+        }
+      }
+    ]
+  });
+
+  // 管理者にDMで通知
+  const managerIds = [MANAGER_ID_1, MANAGER_ID_2].filter(Boolean);
+  managerIds.forEach(managerId => {
+    callSlackApi("chat.postMessage", {
+      channel: managerId,
+      text: `⚠️ 勤怠未打刻の報告`,
+      blocks: [{
+        type: "section",
+        text: { type: "mrkdwn",
+          text: `⚠️ *勤怠未打刻の報告*\n\n*スタッフ：* ${staffName}\n*対象日：* ${dateStr}\n\n本人から「打刻できていない」と回答がありました。\n勤怠修正の対応をお願いします。`
+        }
+      }]
+    });
+  });
+
+  Logger.log(`⚠️ 勤怠未打刻報告: ${staffName} / ${dateStr}`);
 }
