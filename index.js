@@ -1,43 +1,368 @@
-// ============================================================
-// 残業申請・警告システム（おむすび訪問看護ステーション）
-// 既存の GAS コードに追記して使用してください
-// ============================================================
+// ====== 設定 ======
+const SLACK_BOT_TOKEN = PropertiesService.getScriptProperties().getProperty("SLACK_BOT_TOKEN");
+const CHANNEL_ID      = PropertiesService.getScriptProperties().getProperty("CHANNEL_ID");
+const LOG_SHEET       = "受信ログ";
+const SPREADSHEET_ID  = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
 
-// ====== 追加スクリプトプロパティ（設定が必要） ======
-// MANAGER_SLACK_ID_1 = D098H53CYCX（例: U012XXXXXX）
-// MANAGER_SLACK_ID_2 = D09958M3CUQ（例: U034XXXXXX）
-// ※ SLACK_BOT_TOKEN / SPREADSHEET_ID / CHANNEL_ID は既存のまま流用
-
-const OVERTIME_CHANNEL  = "C09946WKPDE";           // 勤怠希望チャンネル
-const OVERTIME_SHEET    = "残業申請ログ";            // 残業申請記録シート名
-const SCHEDULE_SHEET_OT = "スケジュール";            // カイポケPDF変換データシート名
+const OVERTIME_CHANNEL  = "C09946WKPDE";
+const OVERTIME_SHEET    = "残業申請ログ";
+const SCHEDULE_SHEET_OT = "スケジュール";
 const MANAGER_ID_1      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_1");
 const MANAGER_ID_2      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_2");
 
-// ============================================================
-// 【初回のみ実行】残業申請ログシートを作成する
-// ============================================================
+
+// ===== Slackにボタン送信（テスト用） =====
+function sendButton() {
+  const message = {
+    channel: CHANNEL_ID,
+    text: "出勤・退勤ボタンを押してください！",
+    attachments: [
+      {
+        text: "選択してください",
+        fallback: "ボタンが表示されません",
+        callback_id: "attendance",
+        color: "#36a64f",
+        attachment_type: "default",
+        actions: [
+          { name: "punch_in",  text: "出勤",      type: "button", style: "primary" },
+          { name: "punch_out", text: "退勤",      type: "button", style: "danger"  },
+          { name: "oncall",    text: "オンコール", type: "button", style: "primary" }
+        ]
+      }
+    ]
+  };
+
+  const response = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+    method: "post",
+    contentType: "application/json",
+    headers: { "Authorization": "Bearer " + SLACK_BOT_TOKEN },
+    payload: JSON.stringify(message)
+  });
+
+  Logger.log("Slack response: " + response.getContentText());
+}
+
+
+// ===== SlackからのPOSTを受け取る =====
+function doPost(e) {
+  Logger.log("🚀 doPost called! raw=%s", e ? e.postData?.contents : "no data");
+
+  try {
+    if (!e || !e.postData) {
+      Logger.log("⚠ no postData");
+      return ContentService.createTextOutput("no data");
+    }
+
+    const contentType = e.postData.type || "";
+    const raw = e.postData.contents || "";
+
+    // --- URL検証 (Event Subscriptions) ---
+    if (contentType.includes("application/json")) {
+      const body = JSON.parse(raw);
+      if (body.type === "url_verification" && body.challenge) {
+        Logger.log("✅ URL verification OK");
+        return ContentService.createTextOutput(body.challenge)
+          .setMimeType(ContentService.MimeType.TEXT);
+      }
+    }
+
+    // --- ボタン押下イベント (Interactivity & Shortcuts) ---
+    const params = parseFormUrlEncoded(raw);
+    if (!params.payload) {
+      Logger.log("⚠ payload empty");
+      return ContentService.createTextOutput("ok");
+    }
+
+    const payload = JSON.parse(params.payload);
+    Logger.log("📦 payload=%s", JSON.stringify(payload));
+
+    // --- モーダル送信（view_submission）---
+    if (payload.type === "view_submission" && payload.view?.callback_id === "overtime_submit") {
+      handleOvertimeSubmit(payload);
+      return ContentService.createTextOutput(JSON.stringify({ response_action: "clear" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const action   = payload.actions?.[0]?.action_id || payload.actions?.[0]?.name || "";
+    const userName = payload.user?.username || payload.user?.name || payload.user?.id || "unknown";
+
+    // --- 残業申請モーダルを開く ---
+    if (action === "open_overtime_modal") {
+      handleOvertimeModalOpen(payload);
+      return ContentService.createTextOutput(JSON.stringify({ text: "" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- スケジュール通りで完了 ---
+    if (action === "schedule_as_is") {
+      handleScheduleAsIs(payload);
+      return ContentService.createTextOutput(JSON.stringify({ text: "" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- 残業承認 ---
+    if (action === "approve_overtime") {
+      handleOvertimeApprove(payload);
+      return ContentService.createTextOutput(JSON.stringify({ text: "" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- 出勤・退勤・オンコール ---
+    const labelMap = {
+      punch_in:  "出勤",
+      punch_out: "退勤",
+      oncall:    "オンコール"
+    };
+    const label = labelMap[action] || action;
+
+    const resp = {
+      response_type: "in_channel",
+      replace_original: false,
+      text: `✅ ${userName} さんが「${label}」を押しました！`,
+    };
+
+    const output = ContentService.createTextOutput(JSON.stringify(resp))
+      .setMimeType(ContentService.MimeType.JSON);
+
+    Utilities.sleep(300);
+    saveLogOnly(userName, action);
+
+    return output;
+
+  } catch (err) {
+    Logger.log("💥 doPost ERROR: %s", err.stack || err);
+    return ContentService.createTextOutput("Error: " + err);
+  }
+}
+
+
+// ===== URLエンコードされたデータをパース =====
+function parseFormUrlEncoded(body) {
+  const o = {};
+  body.split("&").forEach(kv => {
+    const [k, v] = kv.split("=");
+    if (k) o[decodeURIComponent(k)] = decodeURIComponent(v || "");
+  });
+  return o;
+}
+
+
+// ===== 受信ログにのみ記録する関数 =====
+function saveLogOnly(userName, action) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const logSheet = ss.getSheetByName(LOG_SHEET);
+
+    if (!logSheet) {
+      Logger.log("⚠ シート「" + LOG_SHEET + "」が見つかりません");
+      return;
+    }
+
+    const now = new Date();
+    const dateStr = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd");
+    const timeStr = Utilities.formatDate(now, "Asia/Tokyo", "HH:mm:ss");
+
+    const lock = LockService.getScriptLock();
+    lock.tryLock(3000);
+    logSheet.appendRow([now, userName, action, dateStr, timeStr]);
+    Logger.log("📝 受信ログに追記: " + userName + " / " + action);
+    lock.releaseLock();
+  } catch (err) {
+    Logger.log("💥 saveLogOnly ERROR: " + err);
+  }
+}
+
+
+// ===== 勤怠記録へ転記 =====
+function updateAttendanceSheet() {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const logSheet = ss.getSheetByName("受信ログ");
+    const attendanceSheet = ss.getSheetByName("勤怠記録");
+    const staffSheet = ss.getSheetByName("スタッフマスタ");
+
+    if (!logSheet || !attendanceSheet || !staffSheet) {
+      Logger.log("⚠ シートが見つからない");
+      return;
+    }
+
+    const staffData = staffSheet.getDataRange().getValues();
+    staffData.shift();
+
+    const staffMap = new Map();
+    staffData.forEach(([id, wage, startTime, endTime, fullName]) => {
+      if (!id) return;
+      staffMap.set(String(id).trim(), {
+        id: String(id).trim(),
+        name: fullName || id,
+        wage: Number(wage) || 0,
+        startMinutes: toMinutes(startTime),
+        endMinutes: toMinutes(endTime)
+      });
+    });
+
+    const logs = logSheet.getDataRange().getValues();
+    logs.shift();
+
+    const map = new Map();
+    logs.forEach(row => {
+      const [ts, id, action, dateStr, timeStr, restStr, allowOver, early] = row;
+      if (!id || !dateStr || !timeStr) return;
+
+      const key = `${dateStr}_${String(id).trim()}`;
+      const obj = map.get(key) || {
+        date: dateStr, id: String(id).trim(),
+        in: "", out: "", rest: "", allowOver: "", early: "", oncall: ""
+      };
+
+      if (action === "punch_in")  obj.in  = timeStr;
+      if (action === "punch_out") obj.out = timeStr;
+      if (action === "oncall")    obj.oncall = "OK";
+      if (restStr)    obj.rest     = restStr;
+      if (allowOver)  obj.allowOver = String(allowOver).trim();
+      if (early)      obj.early     = String(early).trim();
+
+      map.set(key, obj);
+    });
+
+    attendanceSheet.clearContents();
+    attendanceSheet.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可","早出","オンコール"]);
+
+    const rows = [];
+    map.forEach(rec => {
+      const staff = staffMap.get(String(rec.id).trim());
+      if (!staff) return;
+
+      const pressedStart = rec.in  ? toMinutes(rec.in)  : null;
+      const pressedEnd   = rec.out ? toMinutes(rec.out) : null;
+
+      let startMinutes = pressedStart;
+      if (rec.early === "OK") {
+        startMinutes = pressedStart;
+      } else if (pressedStart != null && staff.startMinutes != null && pressedStart < staff.startMinutes) {
+        startMinutes = staff.startMinutes;
+      }
+
+      let endMinutes = pressedEnd;
+      const allowOverToday = (rec.allowOver === "OK");
+      if (!allowOverToday && staff.endMinutes != null && endMinutes != null) {
+        if (endMinutes > staff.endMinutes) endMinutes = staff.endMinutes;
+      }
+
+      let restStr, restMinutes;
+      if (rec.rest) {
+        restStr = rec.rest;
+        restMinutes = toMinutes(restStr);
+      } else {
+        if (startMinutes != null && endMinutes != null && (endMinutes - startMinutes) < 360) {
+          restStr = "0:00"; restMinutes = 0;
+        } else {
+          restStr = "1:00"; restMinutes = 60;
+        }
+      }
+
+      let workMinutes = 0;
+      if (startMinutes != null && endMinutes != null) {
+        workMinutes = Math.max(0, endMinutes - startMinutes - restMinutes);
+      }
+
+      const ONCALL_FEE = 5000;
+      const oncallFee = (rec.oncall === "OK") ? ONCALL_FEE : 0;
+
+      const normal = Math.min(workMinutes, 480);
+      const over   = Math.max(0, workMinutes - 480);
+      const money  = (normal / 60 * staff.wage) + (over / 60 * staff.wage * 1.25) + oncallFee;
+
+      rows.push([
+        rec.date, staff.id, staff.name,
+        startMinutes != null ? minutesToHHMM(startMinutes) : "",
+        endMinutes   != null ? minutesToHHMM(endMinutes)   : "",
+        minutesToHHMM(workMinutes), money, restStr,
+        rec.allowOver || "", rec.early || "", rec.oncall || ""
+      ]);
+    });
+
+    if (rows.length) {
+      attendanceSheet.getRange(2, 1, rows.length, 11).setValues(rows);
+      attendanceSheet.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm");
+      attendanceSheet.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");
+      attendanceSheet.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm");
+    }
+
+    const lastRow = attendanceSheet.getLastRow();
+    const rangeI  = attendanceSheet.getRange(2, 9, Math.max(0, lastRow - 1), 1);
+    const rule    = SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo("OK").setBackground("#ffd6d6").setRanges([rangeI]).build();
+    attendanceSheet.setConditionalFormatRules([rule]);
+    applyAttendanceFormatting(attendanceSheet);
+
+    Logger.log("✅ 勤怠記録 更新OK");
+
+  } catch (err) {
+    Logger.log("💥 updateAttendanceSheet ERROR: " + (err.stack || err));
+  }
+}
+
+function applyAttendanceFormatting(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  sheet.setConditionalFormatRules([]);
+  const rules = [];
+  const dataRows = Math.max(1, lastRow - 1);
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=OR(AND($D2="", $E2<>""), AND($D2<>"", $E2=""))')
+    .setBackground("#F46A6A").setRanges([sheet.getRange(`D2:E${lastRow}`)]).build());
+
+  ["D","E"].forEach(col => {
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=AND(${col}2<>"",${col}2<>0)`)
+      .setBackground("#e6f4ea").setRanges([sheet.getRange(`${col}2:${col}${lastRow}`)]).build());
+  });
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$F2>=TIME(8,0,0)')
+    .setBackground("#FFE566").setRanges([sheet.getRange(2, 6, dataRows, 1)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND($F2>=TIME(5,30,0),$F2<TIME(8,0,0))')
+    .setBackground("#FFF1AB").setRanges([sheet.getRange(2, 6, dataRows, 1)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$H2>=TIME(1,0,0)')
+    .setBackground("#F48383").setRanges([sheet.getRange(2, 8, dataRows, 1)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND($H2>0,$H2<TIME(1,0,0))')
+    .setBackground("#F4B4B4").setRanges([sheet.getRange(2, 8, dataRows, 1)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("OK").setBackground("#66C4FF")
+    .setRanges([sheet.getRange(2, 9, dataRows, 1)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND($J2="OK",$D2<>"")')
+    .setBackground("#F6ADC6").setRanges([sheet.getRange(`J2:J${lastRow}`)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("OK").setBackground("#d9e1f2")
+    .setRanges([sheet.getRange(2, 11, dataRows, 1)]).build());
+
+  sheet.setConditionalFormatRules(rules);
+}
+
+
+// ===== 残業申請ログシート初期設定（初回のみ実行） =====
 function setupOvertimeSheet() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sheet = ss.getSheetByName(OVERTIME_SHEET);
   if (!sheet) {
     sheet = ss.insertSheet(OVERTIME_SHEET);
     sheet.appendRow([
-      "対象日", "スタッフID", "スタッフ名",
-      "退勤打刻", "スケジュール終了", "残業時間(分)",
-      "申請状況",        // "未申請" / "申請済" / "承認済" / "スケジュール通り"
-      "残業理由", "申請日時", "承認者", "承認日時",
-      "警告送信回数", "スケジュール開始"  // 始業丸め用
+      "対象日","スタッフID","スタッフ名","退勤打刻","スケジュール終了","残業時間(分)",
+      "申請状況","残業理由","申請日時","承認者","承認日時","警告送信回数","スケジュール開始"
     ]);
     sheet.setFrozenRows(1);
     Logger.log("✅ 残業申請ログシート作成完了");
   }
 }
 
-// ============================================================
-// 【毎朝8時トリガーで実行】残業チェック＆未申請警告
-// トリガー設定：時間ベース → 毎日 → 午前8時〜9時
-// ============================================================
+
+// ===== 毎朝8時トリガー：残業チェック＆未申請警告 =====
 function dailyOvertimeCheck() {
   const ss            = SpreadsheetApp.openById(SPREADSHEET_ID);
   const logSheet      = ss.getSheetByName(LOG_SHEET);
@@ -46,12 +371,10 @@ function dailyOvertimeCheck() {
   const staffSheet    = ss.getSheetByName("スタッフマスタ");
 
   if (!logSheet || !scheduleSheet || !overtimeSheet || !staffSheet) {
-    Logger.log("⚠ 必要なシートが見つかりません");
-    return;
+    Logger.log("⚠ 必要なシートが見つかりません"); return;
   }
 
-  // ===== スタッフマスタ → Map(ID → {name, slackUserId}) =====
-  // スタッフマスタ列構成: [ID, 時給, 出勤時刻, 終了時刻, 日本語名, SlackUserID]
+  // スタッフマスタ読み込み [ID, 時給, 出勤時刻, 終了時刻, 日本語名, SlackUserID]
   const staffData = staffSheet.getDataRange().getValues();
   staffData.shift();
   const staffMap = new Map();
@@ -59,165 +382,121 @@ function dailyOvertimeCheck() {
     if (id) staffMap.set(String(id).trim(), { name: name || id, slackUserId: slackUserId || "" });
   });
 
-  // ===== スケジュールシート → Map("日付_ID" → スケジュール終了時間) =====
-  // スケジュールシート列構成: [職員名, 日付, 開始時間, 終了時間, 区分, 患者名]
-  // ※ サマリーCSVをシートに貼った場合: [職員名, 日付, 最初の開始, 予定終了時間, 訪問件数]
+  // スケジュールシート読み込み [職員名, 日付, 最初の開始, 予定終了時間, 訪問件数]
   const scheduleData = scheduleSheet.getDataRange().getValues();
   scheduleData.shift();
-  // key: "yyyy/MM/dd_staffId", value: { start: "HH:mm", end: "HH:mm" }
   const scheduleMap = new Map();
-
   scheduleData.forEach(row => {
     const staffName = String(row[0]).trim();
-    const dateStr   = String(row[1]).trim();   // 例: "3/11(水)"
-    const startTime = String(row[2]).trim();   // 最初の開始時間 例: "09:00"
-    const endTime   = String(row[3]).trim();   // 予定終了時間   例: "17:30"
-
-    // スタッフ名からIDを逆引き
+    const dateStr   = String(row[1]).trim();
+    const startTime = String(row[2]).trim();
+    const endTime   = String(row[3]).trim();
     staffMap.forEach((info, id) => {
       if (info.name === staffName) {
         const key = `${dateStr}_${id}`;
         const existing = scheduleMap.get(key);
         scheduleMap.set(key, {
-          // 最も早い開始時間を採用
           start: (!existing || startTime < existing.start) ? startTime : existing.start,
-          // 最も遅い終了時間を採用
-          end:   (!existing || endTime > existing.end)     ? endTime   : existing.end
+          end:   (!existing || endTime   > existing.end)   ? endTime   : existing.end
         });
       }
     });
   });
 
-  // ===== 受信ログから退勤時間を集計 =====
+  // 受信ログから退勤時間集計
   const logs = logSheet.getDataRange().getValues();
   logs.shift();
-
-  // 日付・IDごとに退勤時間を集める
-  const punchMap = new Map(); // key: "yyyy/MM/dd_id", value: {out: "HH:mm", dateStr}
+  const punchMap = new Map();
   logs.forEach(row => {
     const [, id, action, dateStr, timeStr] = row;
     if (!id || !dateStr || action !== "punch_out") return;
     const key = `${dateStr}_${String(id).trim()}`;
-    // 最も遅い退勤を採用
     const existing = punchMap.get(key);
     if (!existing || timeStr > existing.out) {
       punchMap.set(key, { out: timeStr, dateStr, id: String(id).trim() });
     }
   });
 
-  // ===== 既存の残業申請ログを読み込む =====
+  // 既存残業申請ログ読み込み
   const overtimeData = overtimeSheet.getDataRange().getValues();
   overtimeData.shift();
-  // key: "日付_id", value: 行インデックス(0始まり)
   const overtimeMap = new Map();
   overtimeData.forEach((row, i) => {
-    const key = `${row[0]}_${row[1]}`;
-    overtimeMap.set(key, i);
+    overtimeMap.set(`${row[0]}_${row[1]}`, i);
   });
 
-  // ===== 残業チェック：スケジュール終了 vs 退勤打刻 =====
   const today = new Date();
-
-  punchMap.forEach((punch, punchKey) => {
-    // スケジュールキーの形式に合わせる（受信ログは yyyy/MM/dd、スケジュールは 3/11(水) 形式）
-    // スケジュールマップのキーをスキャンして日付マッチを探す
-    let scheduleEndTime = null;
-    let matchedScheduleKey = null;
-
-    let scheduleStartTime = null;
+  punchMap.forEach((punch) => {
+    let scheduleEndTime = null, scheduleStartTime = null;
     scheduleMap.forEach((schedule, scheduleKey) => {
       if (scheduleKey.endsWith(`_${punch.id}`)) {
-        const scheduleDatePart = scheduleKey.split("_")[0];
-        const convertedDate = convertScheduleDateToYMD(scheduleDatePart, today.getFullYear());
-        if (convertedDate === punch.dateStr) {
+        const datePart = scheduleKey.split("_")[0];
+        if (convertScheduleDateToYMD(datePart, today.getFullYear()) === punch.dateStr) {
           scheduleEndTime   = schedule.end;
           scheduleStartTime = schedule.start;
-          matchedScheduleKey = scheduleKey;
         }
       }
     });
 
-    if (!scheduleEndTime) return; // スケジュールなし → スキップ
+    if (!scheduleEndTime) return;
+    const overtimeMin = timeToMinutes(punch.out) - timeToMinutes(scheduleEndTime);
+    if (overtimeMin <= 0) return;
 
-    const punchOutMin  = timeToMinutes(punch.out);
-    const scheduleMin  = timeToMinutes(scheduleEndTime);
-    const overtimeMin  = punchOutMin - scheduleMin;
-
-    if (overtimeMin <= 0) return; // 残業なし
-
-    // ===== 残業申請ログに記録（未記録の場合のみ追加） =====
     const overtimeKey = `${punch.dateStr}_${punch.id}`;
     const staff = staffMap.get(punch.id) || { name: punch.id, slackUserId: "" };
 
     if (!overtimeMap.has(overtimeKey)) {
-      // 新規残業記録
       overtimeSheet.appendRow([
-        punch.dateStr,
-        punch.id,
-        staff.name,
-        punch.out,
-        scheduleEndTime,
-        overtimeMin,
-        "未申請",
-        "",       // 残業理由
-        "",       // 申請日時
-        "",       // 承認者
-        "",       // 承認日時
-        0,        // 警告送信回数
-        scheduleStartTime  // スケジュール開始（始業丸め用）
+        punch.dateStr, punch.id, staff.name, punch.out, scheduleEndTime,
+        overtimeMin, "未申請", "", "", "", "", 0, scheduleStartTime
       ]);
-      Logger.log(`📝 残業記録追加: ${staff.name} / ${punch.dateStr} / ${overtimeMin}分`);
     }
   });
 
-  // ===== 未申請の残業に対してSlack通知 =====
-  const updatedOvertimeData = overtimeSheet.getDataRange().getValues();
-  updatedOvertimeData.shift();
-
-  // スタッフごとに未申請をまとめる
+  // 未申請をスタッフごとにまとめてSlack通知
+  const updatedData = overtimeSheet.getDataRange().getValues();
+  updatedData.shift();
   const pendingByStaff = new Map();
 
-  updatedOvertimeData.forEach((row, i) => {
-    const [dateStr, staffId, staffName, punchOut, schedEnd, overtimeMin, status, , , , , warnCount] = row;
-    if (status !== "未申請") return;
-
-    // 今日のデータは翌朝に送るので、昨日以前のみ対象
-    if (dateStr === formatDate(today)) return;
-
+  updatedData.forEach((row, i) => {
+    const [dateStr, staffId, staffName, , , overtimeMin, status, , , , , warnCount] = row;
+    if (status !== "未申請" || dateStr === formatDate(today)) return;
     if (!pendingByStaff.has(staffId)) {
-      pendingByStaff.set(staffId, { staffName, slackUserId: staffMap.get(staffId)?.slackUserId || "", items: [] });
+      pendingByStaff.set(staffId, {
+        staffId, staffName,
+        slackUserId: staffMap.get(staffId)?.slackUserId || "",
+        items: []
+      });
     }
     pendingByStaff.get(staffId).items.push({ dateStr, overtimeMin, rowIndex: i + 2, warnCount });
   });
 
-  // ===== Slack通知送信 =====
-  pendingByStaff.forEach((data, staffId) => {
-    sendOvertimeRequest(data, overtimeSheet);
-  });
+  pendingByStaff.forEach((data) => sendOvertimeRequest(data, overtimeSheet));
 }
 
-// ============================================================
-// Slackに残業申請ボタンを送信する
-// ============================================================
+
+// ===== Slackに残業申請ボタンを送信 =====
 function sendOvertimeRequest(data, overtimeSheet) {
   const { staffName, items } = data;
 
-  // 未申請リストのテキストを作成
   const itemLines = items.map(item => {
     const h = Math.floor(item.overtimeMin / 60);
     const m = item.overtimeMin % 60;
-    const timeStr = h > 0 ? `${h}時間${m}分` : `${m}分`;
-    return `　• ${item.dateStr}（残業 ${timeStr}）`;
+    return `　• ${item.dateStr}（残業 ${h > 0 ? h+"時間" : ""}${m}分）`;
   }).join("\n");
 
-  const message = {
+  const btnValue = JSON.stringify({
+    staffId: data.staffId, staffName,
+    items: items.map(i => ({ dateStr: i.dateStr, overtimeMin: i.overtimeMin, rowIndex: i.rowIndex }))
+  });
+
+  callSlackApi("chat.postMessage", {
     channel: OVERTIME_CHANNEL,
-    text: `⏰ 残業申請のお知らせ`,
+    text: "⏰ 残業申請のお知らせ",
     blocks: [
       {
         type: "section",
-        text: {
-          type: "mrkdwn",
+        text: { type: "mrkdwn",
           text: `⏰ *${staffName} さんへ*\n\n以下の日程でスケジュール終了時間を超えた記録があります。\n残業申請をするか、スケジュール通りで完了するかをご選択ください。\n\n${itemLines}`
         }
       },
@@ -229,11 +508,7 @@ function sendOvertimeRequest(data, overtimeSheet) {
             text: { type: "plain_text", text: "📝 残業申請する", emoji: true },
             style: "primary",
             action_id: "open_overtime_modal",
-            value: JSON.stringify({
-              staffId: data.staffId || staffName,
-              staffName: staffName,
-              items: items.map(i => ({ dateStr: i.dateStr, overtimeMin: i.overtimeMin, rowIndex: i.rowIndex }))
-            })
+            value: btnValue
           },
           {
             type: "button",
@@ -241,115 +516,70 @@ function sendOvertimeRequest(data, overtimeSheet) {
             style: "danger",
             action_id: "schedule_as_is",
             value: JSON.stringify({
-              staffId: data.staffId || staffName,
-              staffName: staffName,
+              staffId: data.staffId, staffName,
               items: items.map(i => ({ dateStr: i.dateStr, rowIndex: i.rowIndex }))
             })
           }
         ]
       }
     ]
-  };
-
-  callSlackApi("chat.postMessage", message);
-
-  // 警告送信回数を更新
-  items.forEach(item => {
-    const cell = overtimeSheet.getRange(item.rowIndex, 12);
-    cell.setValue((item.warnCount || 0) + 1);
   });
 
-  Logger.log(`📨 残業申請通知送信: ${staffName} / ${items.length}件`);
+  items.forEach(item => {
+    overtimeSheet.getRange(item.rowIndex, 12).setValue((item.warnCount || 0) + 1);
+  });
 }
 
-// ============================================================
-// 「✅ スケジュール通りで完了」ボタン処理
-// → 退勤時間をスケジュール終了時間に自動カット＆申請状況を更新
-// ============================================================
-// ※ 既存 doPost に追記：
-// if (action === "schedule_as_is") {
-//   handleScheduleAsIs(payload);
-//   return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.JSON);
-// }
 
+// ===== 「スケジュール通りで完了」ボタン処理 =====
 function handleScheduleAsIs(payload) {
   const ss            = SpreadsheetApp.openById(SPREADSHEET_ID);
   const overtimeSheet = ss.getSheetByName(OVERTIME_SHEET);
-  const logSheet      = ss.getSheetByName(LOG_SHEET);
-
-  const buttonValue   = JSON.parse(payload.actions?.[0]?.value || "{}");
-  const { staffName, staffId, items } = buttonValue;
-  const now    = new Date();
-  const nowStr = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd HH:mm");
-
+  const { staffName, items } = JSON.parse(payload.actions?.[0]?.value || "{}");
+  const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm");
   const updatedDates = [];
 
   items.forEach(item => {
-    const rowIndex      = item.rowIndex;
-    const scheduleEnd   = overtimeSheet.getRange(rowIndex, 5).getValue(); // スケジュール終了時間
-    const scheduleStart = overtimeSheet.getRange(rowIndex, 13).getValue(); // スケジュール開始時間
-    const dateStr       = overtimeSheet.getRange(rowIndex, 1).getValue();
-
-    // 残業申請ログを「スケジュール通り」で更新
-    overtimeSheet.getRange(rowIndex, 7).setValue("スケジュール通り");
-    overtimeSheet.getRange(rowIndex, 9).setValue(nowStr);
-
-    // 受信ログの退勤時間をスケジュール終了時間に上書き
-    // ※ 受信ログを直接編集するのではなく、勤怠記録の更新時に反映される
-    // updateAttendanceSheet() の allowOver 判定で自動カットされる想定
-
-    updatedDates.push(dateStr);
+    overtimeSheet.getRange(item.rowIndex, 7).setValue("スケジュール通り");
+    overtimeSheet.getRange(item.rowIndex, 9).setValue(nowStr);
+    updatedDates.push(overtimeSheet.getRange(item.rowIndex, 1).getValue());
   });
 
-  const datesText = updatedDates.join("、");
-
-  // チャンネルに通知
-  const msg = {
+  callSlackApi("chat.postMessage", {
     channel: OVERTIME_CHANNEL,
-    text: `📅 スケジュール通りで完了`,
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `📅 *${staffName} さん*\n${datesText} の勤怠をスケジュール通りで完了しました。\n退勤時間はスケジュール終了時間で記録されます。`
-        }
+    text: "📅 スケジュール通りで完了",
+    blocks: [{
+      type: "section",
+      text: { type: "mrkdwn",
+        text: `📅 *${staffName} さん*\n${updatedDates.join("、")} の勤怠をスケジュール通りで完了しました。\n退勤時間はスケジュール終了時間で記録されます。`
       }
-    ]
-  };
-
-  callSlackApi("chat.postMessage", msg);
-  Logger.log(`📅 スケジュール通り処理完了: ${staffName} / ${datesText}`);
+    }]
+  });
 }
 
-// ============================================================
-// モーダルを開く
-// ============================================================
-function handleOvertimeModalOpen(payload) {
-  const triggerId = payload.trigger_id;
-  const buttonValue = JSON.parse(payload.actions?.[0]?.value || "{}");
-  const { staffName, items } = buttonValue;
 
-  // 申請対象の日付リストをオプションとして作成
+// ===== 残業申請モーダルを開く =====
+function handleOvertimeModalOpen(payload) {
+  const { staffName, items } = JSON.parse(payload.actions?.[0]?.value || "{}");
+
   const dateOptions = items.map(item => {
     const h = Math.floor(item.overtimeMin / 60);
     const m = item.overtimeMin % 60;
-    const timeStr = h > 0 ? `${h}時間${m}分` : `${m}分`;
     return {
-      text: { type: "plain_text", text: `${item.dateStr}（残業 ${timeStr}）` },
+      text: { type: "plain_text", text: `${item.dateStr}（残業 ${h > 0 ? h+"時間" : ""}${m}分）` },
       value: String(item.rowIndex)
     };
   });
 
-  const modal = {
-    trigger_id: triggerId,
+  callSlackApi("views.open", {
+    trigger_id: payload.trigger_id,
     view: {
       type: "modal",
       callback_id: "overtime_submit",
-      private_metadata: JSON.stringify(buttonValue),
-      title: { type: "plain_text", text: "残業申請" },
+      private_metadata: payload.actions?.[0]?.value || "{}",
+      title:  { type: "plain_text", text: "残業申請" },
       submit: { type: "plain_text", text: "申請する" },
-      close: { type: "plain_text", text: "キャンセル" },
+      close:  { type: "plain_text", text: "キャンセル" },
       blocks: [
         {
           type: "section",
@@ -359,11 +589,7 @@ function handleOvertimeModalOpen(payload) {
           type: "input",
           block_id: "target_dates",
           label: { type: "plain_text", text: "申請する日程（複数選択可）" },
-          element: {
-            type: "checkboxes",
-            action_id: "dates_selected",
-            options: dateOptions
-          }
+          element: { type: "checkboxes", action_id: "dates_selected", options: dateOptions }
         },
         {
           type: "input",
@@ -378,161 +604,124 @@ function handleOvertimeModalOpen(payload) {
         }
       ]
     }
-  };
-
-  callSlackApi("views.open", modal);
+  });
 }
 
-// ============================================================
-// モーダル送信（申請完了）の処理
-// ============================================================
-function handleOvertimeSubmit(payload) {
-  const ss           = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const overtimeSheet = ss.getSheetByName(OVERTIME_SHEET);
 
+// ===== モーダル送信（申請完了） =====
+function handleOvertimeSubmit(payload) {
+  const ss            = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const overtimeSheet = ss.getSheetByName(OVERTIME_SHEET);
   const values        = payload.view.state.values;
   const metadata      = JSON.parse(payload.view.private_metadata || "{}");
   const applicantName = metadata.staffName || "不明";
-
-  // 選択された日程を取得
   const selectedOptions = values?.target_dates?.dates_selected?.selected_options || [];
   const reason          = values?.overtime_reason?.reason_input?.value || "";
-  const now             = new Date();
-  const nowStr          = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd HH:mm");
+  const nowStr          = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm");
 
   if (selectedOptions.length === 0) return;
 
-  // 残業申請ログを更新
   const appliedDates = [];
   selectedOptions.forEach(opt => {
     const rowIndex = Number(opt.value);
-    overtimeSheet.getRange(rowIndex, 7).setValue("申請済");   // 申請状況
-    overtimeSheet.getRange(rowIndex, 8).setValue(reason);      // 残業理由
-    overtimeSheet.getRange(rowIndex, 9).setValue(nowStr);      // 申請日時
-
-    const dateStr = overtimeSheet.getRange(rowIndex, 1).getValue();
-    appliedDates.push(dateStr);
+    overtimeSheet.getRange(rowIndex, 7).setValue("申請済");
+    overtimeSheet.getRange(rowIndex, 8).setValue(reason);
+    overtimeSheet.getRange(rowIndex, 9).setValue(nowStr);
+    appliedDates.push(overtimeSheet.getRange(rowIndex, 1).getValue());
   });
 
-  // チャンネルに申請完了通知
-  const datesText = appliedDates.join("、");
-  const completeMsg = {
+  callSlackApi("chat.postMessage", {
     channel: OVERTIME_CHANNEL,
-    text: `✅ 残業申請が提出されました`,
+    text: "✅ 残業申請が提出されました",
     blocks: [
       {
         type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `✅ *${applicantName} さんが残業申請を提出しました*\n\n📅 対象日：${datesText}\n📝 理由：${reason}\n\n<@${MANAGER_ID_1}> <@${MANAGER_ID_2}> ご確認・承認をお願いします 🙏`
+        text: { type: "mrkdwn",
+          text: `✅ *${applicantName} さんが残業申請を提出しました*\n\n📅 対象日：${appliedDates.join("、")}\n📝 理由：${reason}\n\n<@${MANAGER_ID_1}> <@${MANAGER_ID_2}> ご確認・承認をお願いします 🙏`
         }
       },
       {
         type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: { type: "plain_text", text: "✅ 承認する", emoji: true },
-            style: "primary",
-            action_id: "approve_overtime",
-            value: JSON.stringify({
-              staffName: applicantName,
-              rowIndexes: selectedOptions.map(o => Number(o.value)),
-              dates: appliedDates
-            })
-          }
-        ]
+        elements: [{
+          type: "button",
+          text: { type: "plain_text", text: "✅ 承認する", emoji: true },
+          style: "primary",
+          action_id: "approve_overtime",
+          value: JSON.stringify({
+            staffName: applicantName,
+            rowIndexes: selectedOptions.map(o => Number(o.value)),
+            dates: appliedDates
+          })
+        }]
       }
     ]
-  };
-
-  callSlackApi("chat.postMessage", completeMsg);
-  Logger.log(`✅ 残業申請完了: ${applicantName} / ${datesText}`);
+  });
 }
 
-// ============================================================
-// 承認ボタン押下の処理
-// ============================================================
-// ※ 既存の doPost 内に以下を追記してください：
-// if (action === "approve_overtime") {
-//   handleOvertimeApprove(payload);
-//   return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.JSON);
-// }
 
+// ===== 承認ボタン処理 =====
 function handleOvertimeApprove(payload) {
   const ss            = SpreadsheetApp.openById(SPREADSHEET_ID);
   const overtimeSheet = ss.getSheetByName(OVERTIME_SHEET);
-
   const approverName  = payload.user?.name || "管理者";
-  const buttonValue   = JSON.parse(payload.actions?.[0]?.value || "{}");
-  const { staffName, rowIndexes, dates } = buttonValue;
-  const now    = new Date();
-  const nowStr = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd HH:mm");
+  const { staffName, rowIndexes, dates } = JSON.parse(payload.actions?.[0]?.value || "{}");
+  const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm");
 
   rowIndexes.forEach(rowIndex => {
-    overtimeSheet.getRange(rowIndex, 7).setValue("承認済");   // 申請状況
-    overtimeSheet.getRange(rowIndex, 10).setValue(approverName); // 承認者
-    overtimeSheet.getRange(rowIndex, 11).setValue(nowStr);       // 承認日時
+    overtimeSheet.getRange(rowIndex, 7).setValue("承認済");
+    overtimeSheet.getRange(rowIndex, 10).setValue(approverName);
+    overtimeSheet.getRange(rowIndex, 11).setValue(nowStr);
   });
 
-  const datesText = dates.join("、");
-  const approveMsg = {
+  callSlackApi("chat.postMessage", {
     channel: OVERTIME_CHANNEL,
-    text: `🎉 残業申請が承認されました`,
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `🎉 *${staffName} さんの残業申請が承認されました*\n\n📅 対象日：${datesText}\n👤 承認者：${approverName}（${nowStr}）`
-        }
+    text: "🎉 残業申請が承認されました",
+    blocks: [{
+      type: "section",
+      text: { type: "mrkdwn",
+        text: `🎉 *${staffName} さんの残業申請が承認されました*\n\n📅 対象日：${dates.join("、")}\n👤 承認者：${approverName}（${nowStr}）`
       }
-    ]
-  };
-
-  callSlackApi("chat.postMessage", approveMsg);
-  Logger.log(`🎉 残業承認完了: ${staffName} / ${datesText} / 承認者: ${approverName}`);
+    }]
+  });
 }
 
-// ============================================================
-// 既存 doPost に追記する処理（差し込み用）
-// ============================================================
-// 既存の doPost 関数の action 判定部分（labelMap の下あたり）に
-// 以下のコードをまとめて追加してください：
-//
-// // --- 残業申請モーダルを開く ---
-// if (action === "open_overtime_modal") {
-//   handleOvertimeModalOpen(payload);
-//   return ContentService.createTextOutput(JSON.stringify({ text: "" }))
-//     .setMimeType(ContentService.MimeType.JSON);
-// }
-//
-// // --- スケジュール通りで完了 ---
-// if (action === "schedule_as_is") {
-//   handleScheduleAsIs(payload);
-//   return ContentService.createTextOutput(JSON.stringify({ text: "" }))
-//     .setMimeType(ContentService.MimeType.JSON);
-// }
-//
-// // --- 残業承認 ---
-// if (action === "approve_overtime") {
-//   handleOvertimeApprove(payload);
-//   return ContentService.createTextOutput(JSON.stringify({ text: "" }))
-//     .setMimeType(ContentService.MimeType.JSON);
-// }
-//
-// // --- モーダル送信（view_submission） ---
-// if (payload.type === "view_submission" && payload.view?.callback_id === "overtime_submit") {
-//   handleOvertimeSubmit(payload);
-//   return ContentService.createTextOutput(JSON.stringify({ response_action: "clear" }))
-//     .setMimeType(ContentService.MimeType.JSON);
-// }
 
-// ============================================================
-// ユーティリティ関数
-// ============================================================
+// ====== 分変換ユーティリティ ======
+function toMinutes(v) {
+  try {
+    if (v instanceof Date) return v.getHours() * 60 + v.getMinutes();
+    if (typeof v === "string") {
+      const [h, m] = v.split(":").map(Number);
+      return h * 60 + m;
+    }
+    return 0;
+  } catch(e) { return 0; }
+}
 
-// Slack API を呼び出す汎用関数
+function minutesToHHMM(min) {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}:${m.toString().padStart(2, "0")}`;
+}
+
+function timeToMinutes(timeStr) {
+  if (!timeStr) return 0;
+  const [h, m] = String(timeStr).split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+function formatDate(date) {
+  return Utilities.formatDate(date, "Asia/Tokyo", "yyyy/MM/dd");
+}
+
+function convertScheduleDateToYMD(scheduleDateStr, year) {
+  try {
+    const match = scheduleDateStr.match(/(\d+)\/(\d+)/);
+    if (!match) return "";
+    return `${year}/${String(match[1]).padStart(2,"0")}/${String(match[2]).padStart(2,"0")}`;
+  } catch(e) { return ""; }
+}
+
 function callSlackApi(method, body) {
   const response = UrlFetchApp.fetch(`https://slack.com/api/${method}`, {
     method: "post",
@@ -541,64 +730,108 @@ function callSlackApi(method, body) {
     payload: JSON.stringify(body)
   });
   const result = JSON.parse(response.getContentText());
-  if (!result.ok) {
-    Logger.log(`⚠ Slack API エラー [${method}]: ${result.error}`);
-  }
+  if (!result.ok) Logger.log(`⚠ Slack API エラー [${method}]: ${result.error}`);
   return result;
 }
 
-// "HH:mm" → 分に変換
-function timeToMinutes(timeStr) {
-  if (!timeStr) return 0;
-  const [h, m] = String(timeStr).split(":").map(Number);
-  return (h || 0) * 60 + (m || 0);
+function testAuth() {
+  const id = "19V-S--MPEqAGgothYOfCRKNaq9-fuRLc-PYOJqpj6e8";
+  const ss = SpreadsheetApp.openById(id);
+  const sheet = ss.getSheets()[0];
+  Logger.log("✅ 認証成功: " + sheet.getName());
 }
 
-// Date → "yyyy/MM/dd"
-function formatDate(date) {
-  return Utilities.formatDate(date, "Asia/Tokyo", "yyyy/MM/dd");
+
+// ===== ポップアップで年月を入力して出力 =====
+function exportMonthlySheetsPrompt() {
+  const text = Browser.inputBox("月次シート出力", "出力したい年月を 2025/11 の形式で入力してください。", Browser.Buttons.OK_CANCEL);
+  if (text === "cancel") return;
+  const match = text.match(/^(\d{4})\/(\d{1,2})$/);
+  if (!match) { Browser.msgBox("⚠ 入力形式が正しくありません。\n例: 2025/11"); return; }
+  exportMonthlySheets(Number(match[1]), Number(match[2]));
+  Browser.msgBox(`📄 ${match[1]}年${match[2]}月 の個人シートを作成しました！`);
 }
 
-// "3/11(水)" → "2026/03/11" に変換
-function convertScheduleDateToYMD(scheduleDateStr, year) {
-  try {
-    const match = scheduleDateStr.match(/(\d+)\/(\d+)/);
-    if (!match) return "";
-    const month = String(match[1]).padStart(2, "0");
-    const day   = String(match[2]).padStart(2, "0");
-    return `${year}/${month}/${day}`;
-  } catch (e) {
-    return "";
-  }
+
+// ===== 月末個人シート出力 =====
+function exportMonthlySheets(targetYear, targetMonth) {
+  const ss         = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const attendance = ss.getSheetByName("勤怠記録");
+  const data       = attendance.getDataRange().getValues();
+  data.shift();
+
+  const today = new Date();
+  const year  = targetYear  || today.getFullYear();
+  const month = targetMonth || (today.getMonth() + 1);
+
+  const map = new Map();
+  data.forEach(r => {
+    const date = r[0];
+    if (!(date instanceof Date)) return;
+    if (date.getFullYear() !== year || date.getMonth() + 1 !== month) return;
+    const id = r[1];
+    if (!map.has(id)) map.set(id, { name: r[2], rows: [] });
+    map.get(id).rows.push(r);
+  });
+
+  map.forEach((obj, id) => {
+    const { name, rows } = obj;
+    let oncallCount = 0;
+    rows.forEach(r => { if (r[10] === "OK") oncallCount++; });
+
+    const sheetName = `${name}_${year}${String(month).padStart(2, "0")}`;
+    const old = ss.getSheetByName(sheetName);
+    if (old) ss.deleteSheet(old);
+    const sh = ss.insertSheet(sheetName);
+
+    sh.appendRow(["日付","ID","名前","出勤","退勤","労働時間","勤務金額","休憩","残業許可","早出","オンコール"]);
+    sh.getRange(2, 1, rows.length, 11).setValues(rows);
+    sh.getRange(2, 4, rows.length, 1).setNumberFormat("h:mm");
+    sh.getRange(2, 5, rows.length, 1).setNumberFormat("h:mm");
+    sh.getRange(2, 6, rows.length, 1).setNumberFormat("[h]:mm");
+    sh.getRange(2, 7, rows.length, 1).setNumberFormat("¥#,##0");
+    sh.getRange(2, 8, rows.length, 1).setNumberFormat("[h]:mm");
+
+    const totalRow   = rows.length + 3;
+    const overtimeRow = totalRow + 1;
+    const moneyRow   = totalRow + 2;
+    const oncallRow  = moneyRow + 1;
+
+    sh.getRange(totalRow, 3).setValue("【合計】");
+    sh.getRange(totalRow, 6).setFormula(`=SUM(F2:F${rows.length + 1})`).setNumberFormat("[h]:mm");
+    sh.getRange(overtimeRow, 3).setValue("残業時間");
+    sh.getRange(overtimeRow, 6)
+      .setFormula(`=SUM(FILTER(F2:F${rows.length+1},F2:F${rows.length+1}>TIME(8,0,0)))-TIME(8,0,0)*COUNT(FILTER(F2:F${rows.length+1},F2:F${rows.length+1}>TIME(8,0,0)))`)
+      .setNumberFormat("[h]:mm");
+    sh.getRange(moneyRow, 3).setValue("勤務金額 合計");
+    sh.getRange(moneyRow, 7).setFormula(`=SUM(G2:G${rows.length + 1})`).setNumberFormat("¥#,##0");
+    sh.getRange(oncallRow, 3).setValue("オンコール回数");
+    sh.getRange(oncallRow, 6).setValue(oncallCount + " 回");
+    sh.getRange(oncallRow + 1, 3).setValue("オンコール手当");
+    sh.getRange(oncallRow + 1, 7).setValue(oncallCount * 5000).setNumberFormat("¥#,##0");
+
+    applyStripeFormatting(sh);
+    Logger.log(`📄 作成: ${sheetName}`);
+  });
 }
 
-// ============================================================
-// セットアップ手順（初回のみ）
-// ============================================================
-// 1. setupOvertimeSheet() を手動実行 → 「残業申請ログ」シートを作成
-// 2. スタッフマスタのF列に各スタッフの Slack User ID を追加
-// 3. スクリプトプロパティに追加:
-//    - MANAGER_SLACK_ID_1 = 川畑さんの Slack User ID
-//    - MANAGER_SLACK_ID_2 = 岩崎さんの Slack User ID
-// 4. 「スケジュール」シートを作成し、カイポケPDFから変換したサマリーCSVを毎週貼り付け
-//    列構成: [職員名, 日付, 最初の開始, 予定終了時間, 訪問件数]
-// 5. dailyOvertimeCheck() にトリガーを設定:
-//    時間ベース → 毎日 → 午前8時〜9時
-// 6. 既存の doPost 関数に、上記コメントの差し込みコードを追加
-//
-// ============================================================
-// 始業時間の丸めについて
-// ============================================================
-// 打刻の出勤時間 < スケジュール開始時間 の場合
-// → updateAttendanceSheet() の startMinutes 決定ロジックで
-//    スケジュール開始時間（staffMap の startMinutes）に丸められます。
-// ※ 早出申請（early=OK）がある場合のみ実打刻を採用します。
-//
-// ============================================================
-// 退勤時間の自動カットについて
-// ============================================================
-// 「✅ スケジュール通りで完了」押下 or 残業申請なし の場合
-// → 申請状況が "スケジュール通り" or "未申請" のまま
-// → updateAttendanceSheet() の allowOver 判定（allowOverToday=false）で
-//    スケジュール終了時間（staff.endMinutes）に自動カットされます。
-// ============================================================
+
+function applyStripeFormatting(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const lastCol = sheet.getLastColumn();
+  const rules = [];
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=ROW()=1').setBackground('#F6DEE6').setBold(true)
+    .setRanges([sheet.getRange(1, 1, 1, lastCol)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND(ISODD(ROW()), $C2<>"【合計】")')
+    .setBackground('#CDE6C7').setRanges([sheet.getRange(2, 1, lastRow - 1, lastCol)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$C2="【合計】"').setBackground('#FFF2CC').setBold(true)
+    .setRanges([sheet.getRange(2, 1, lastRow, lastCol)]).build());
+
+  sheet.setConditionalFormatRules(rules);
+  Logger.log("🎉 個人シート完成！");
+}
