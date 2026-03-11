@@ -1395,7 +1395,7 @@ function noonAttendanceReminder() {
 
 
 // ===== 設定：今日のおむすびチャンネル =====
-const TODAY_CHANNEL = PropertiesService.getScriptProperties().getProperty("TODAY_CHANNEL");
+const TODAY_CHANNEL ="C0AKRKRLCQ5";
 
 // スタッフ定義
 const STAFF_CONFIG = [
