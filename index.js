@@ -1707,59 +1707,62 @@ function importKaipokePDF() {
   const docId = converted.id;
   docFile.setTrashed(true); // コピー元を削除
 
-  // テキスト取得
-  const doc = DocumentApp.openById(docId);
-  const text = doc.getBody().getText();
-  Logger.log("📝 テキスト取得完了 (" + text.length + "文字)");
-
-  // 変換したドキュメントは確認用に残す（確認後に手動削除してください）
-  // DriveApp.getFileById(docId).setTrashed(true);
   Logger.log("📄 変換ドキュメントID: " + docId);
 
-  // テキスト解析してスケジュール詳細シートに書き込む
+  // Docs APIでテーブルを取得
   parseAndWriteSchedule(docId);
+  
+  // 変換ドキュメントを削除
+  DriveApp.getFileById(docId).setTrashed(true);
 }
 
 function parseAndWriteSchedule(docId) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
-  if (!sheet) {
-    sheet = ss.insertSheet(SCHEDULE_DETAIL_SHEET);
-  }
+  if (!sheet) sheet = ss.insertSheet(SCHEDULE_DETAIL_SHEET);
   sheet.clearContents();
   sheet.appendRow(["職員名", "日付", "開始", "終了", "区分", "患者名/内容"]);
 
-  const doc = DocumentApp.openById(docId);
-  const body = doc.getBody();
+  // Docs REST APIでテーブルを取得
+  const url = "https://docs.googleapis.com/v1/documents/" + docId;
+  const token = ScriptApp.getOAuthToken();
+  const res = UrlFetchApp.fetch(url, { headers: { Authorization: "Bearer " + token } });
+  const docData = JSON.parse(res.getContentText());
+
   const timePattern = /(\d{2}:\d{2})～(\d{2}:\d{2})（(予定|実績)・(医|介|業務)）/;
   const rows = [];
 
-  // テーブルを処理
-  const numChildren = body.getNumChildren();
-  for (let i = 0; i < numChildren; i++) {
-    const child = body.getChild(i);
-    if (child.getType() !== DocumentApp.ElementType.TABLE) continue;
-
-    const table = child.asTable();
-    const numRows = table.getNumRows();
-    if (numRows < 2) continue;
+  const bodyContent = docData.body && docData.body.content ? docData.body.content : [];
+  for (const elem of bodyContent) {
+    if (!elem.table) continue;
+    const table = elem.table;
+    const tableRows = table.tableRows || [];
+    if (tableRows.length < 2) continue;
 
     // ヘッダー行から日付を取得
-    const headerRow = table.getRow(0);
-    const dates = [];
-    for (let c = 0; c < headerRow.getNumCells(); c++) {
-      dates.push(headerRow.getCell(c).getText().trim());
-    }
+    const dates = (tableRows[0].tableCells || []).map(function(cell) {
+      return (cell.content || []).map(function(c) {
+        return (c.paragraph && c.paragraph.elements ? c.paragraph.elements : [])
+          .map(function(e) { return e.textRun ? e.textRun.content : ""; }).join("");
+      }).join("").trim();
+    });
 
-    // データ行を処理
-    for (let r = 1; r < numRows; r++) {
-      const row = table.getRow(r);
-      const staffName = row.getCell(0).getText().trim();
+    // データ行
+    for (let r = 1; r < tableRows.length; r++) {
+      const cells = tableRows[r].tableCells || [];
+      const staffName = (cells[0] && cells[0].content ? cells[0].content : []).map(function(c) {
+        return (c.paragraph && c.paragraph.elements ? c.paragraph.elements : [])
+          .map(function(e) { return e.textRun ? e.textRun.content : ""; }).join("");
+      }).join("").trim();
       if (!staffName) continue;
 
-      for (let c = 1; c < row.getNumCells(); c++) {
+      for (let c = 1; c < cells.length; c++) {
         const date = dates[c] || "";
-        const cellText = row.getCell(c).getText().trim();
+        const cellContent = cells[c] && cells[c].content ? cells[c].content : [];
+        const cellText = cellContent.map(function(c2) {
+          return (c2.paragraph && c2.paragraph.elements ? c2.paragraph.elements : [])
+            .map(function(e) { return e.textRun ? e.textRun.content : ""; }).join("");
+        }).join("").trim();
         if (!cellText) continue;
 
         const lines = cellText.split("");
@@ -1768,20 +1771,13 @@ function parseAndWriteSchedule(docId) {
           const line = lines[j].trim();
           const m = line.match(timePattern);
           if (m) {
-            const start = m[1];
-            const end   = m[2];
-            const kind  = m[4];
-            // 同じ行の時刻以降が患者名
+            const start = m[1], end2 = m[2], kind = m[4];
             let patient = line.substring(m.index + m[0].length).trim();
-            // なければ次の行
             if (!patient && j + 1 < lines.length) {
               const nextLine = lines[j+1].trim();
-              if (!nextLine.match(timePattern)) {
-                patient = nextLine;
-                j++;
-              }
+              if (!nextLine.match(timePattern)) { patient = nextLine; j++; }
             }
-            rows.push([staffName, date, start, end, kind, patient]);
+            rows.push([staffName, date, start, end2, kind, patient]);
           }
           j++;
         }
@@ -1793,6 +1789,6 @@ function parseAndWriteSchedule(docId) {
     sheet.getRange(2, 1, rows.length, 6).setValues(rows);
     Logger.log("✅ " + rows.length + "件書き込み完了");
   } else {
-    Logger.log("⚠ データが取得できませんでした");
+    Logger.log("⚠ テーブルデータが取得できませんでした");
   }
 }
