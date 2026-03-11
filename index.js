@@ -1412,6 +1412,7 @@ const STAFF_CONFIG = [
 function postTodayOmusubi() {
   const today = new Date();
   const todayDisp = Utilities.formatDate(today, "Asia/Tokyo", "M/d(E)");
+  const todayStr  = Utilities.formatDate(today, "Asia/Tokyo", "yyyy/MM/dd");
 
   const blocks = [
     {
