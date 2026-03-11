@@ -167,10 +167,122 @@ function saveLogOnly(userName, action) {
     logSheet.appendRow([now, userName, action, dateStr, timeStr]);
     Logger.log("📝 受信ログに追記: " + userName + " / " + action);
     lock.releaseLock();
+
+    // 退勤打刻のときにリアルタイムで残業チェック
+    if (action === "punch_out") {
+      checkOvertimeOnPunchOut(ss, userName, dateStr, timeStr);
+    }
+
   } catch (err) {
     Logger.log("💥 saveLogOnly ERROR: " + err);
   }
 }
+
+// ===== 退勤打刻時リアルタイム残業チェック =====
+function checkOvertimeOnPunchOut(ss, userName, dateStr, punchOutTime) {
+  try {
+    const scheduleSheet = ss.getSheetByName(SCHEDULE_SHEET_OT);
+    const overtimeSheet = ss.getSheetByName(OVERTIME_SHEET);
+    const staffSheet    = ss.getSheetByName("スタッフマスタ");
+
+    if (!scheduleSheet || !overtimeSheet || !staffSheet) return;
+
+    // スタッフマスタから日本語名を取得
+    const staffData = staffSheet.getDataRange().getValues();
+    staffData.shift();
+    let staffName = userName;
+    staffData.forEach(([id, , , , name]) => {
+      if (String(id).trim() === userName) staffName = name || userName;
+    });
+
+    // スケジュールシートからその日の終了時間を検索
+    const scheduleData = scheduleSheet.getDataRange().getValues();
+    scheduleData.shift();
+    let scheduleEndTime = null, scheduleStartTime = null;
+    const today = new Date();
+
+    scheduleData.forEach(row => {
+      if (String(row[0]).trim() !== staffName) return;
+      const convertedDate = convertScheduleDateToYMD(String(row[1]).trim(), today.getFullYear());
+      if (convertedDate !== dateStr) return;
+      const end = String(row[3]).trim(), start = String(row[2]).trim();
+      if (!scheduleEndTime || end > scheduleEndTime) {
+        scheduleEndTime = end; scheduleStartTime = start;
+      }
+    });
+
+    if (!scheduleEndTime) return;
+
+    // HH:mm:ss → HH:mm に変換して比較
+    const punchOutHHMM = punchOutTime.substring(0, 5);
+    const overtimeMin  = timeToMinutes(punchOutHHMM) - timeToMinutes(scheduleEndTime);
+    if (overtimeMin <= 0) return;
+
+    // 残業申請ログに既に記録済みかチェック
+    const overtimeData = overtimeSheet.getDataRange().getValues();
+    overtimeData.shift();
+    const alreadyLogged = overtimeData.some(row =>
+      String(row[0]) === dateStr && String(row[1]) === userName
+    );
+    if (alreadyLogged) return;
+
+    // 残業申請ログに追記
+    const newRowIndex = overtimeSheet.getLastRow() + 1;
+    overtimeSheet.appendRow([
+      dateStr, userName, staffName, punchOutHHMM, scheduleEndTime,
+      overtimeMin, "未申請", "", "", "", "", 0, scheduleStartTime
+    ]);
+
+    // その場でSlackにボタン送信
+    const h = Math.floor(overtimeMin / 60);
+    const m = overtimeMin % 60;
+    const overtimeStr = `${h > 0 ? h+"時間" : ""}${m}分`;
+
+    callSlackApi("chat.postMessage", {
+      channel: OVERTIME_CHANNEL,
+      text: "⏰ 残業申請のお知らせ",
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn",
+            text: `⏰ *${staffName} さんへ*\n\n本日（${dateStr}）スケジュール終了時間を ${overtimeStr} 超えて退勤しました。\n残業申請をするか、スケジュール通りで完了するかをご選択ください。`
+          }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "📝 残業申請する", emoji: true },
+              style: "primary",
+              action_id: "open_overtime_modal",
+              value: JSON.stringify({
+                staffId: userName, staffName,
+                items: [{ dateStr, overtimeMin, rowIndex: newRowIndex }]
+              })
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "✅ スケジュール通りで完了", emoji: true },
+              style: "danger",
+              action_id: "schedule_as_is",
+              value: JSON.stringify({
+                staffId: userName, staffName,
+                items: [{ dateStr, rowIndex: newRowIndex }]
+              })
+            }
+          ]
+        }
+      ]
+    });
+
+    Logger.log(`⏰ リアルタイム残業通知送信: ${staffName} / ${overtimeStr}`);
+
+  } catch (err) {
+    Logger.log("💥 checkOvertimeOnPunchOut ERROR: " + err);
+  }
+}
+
 
 
 // ===== 勤怠記録へ転記 =====
