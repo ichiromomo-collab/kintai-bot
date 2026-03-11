@@ -1060,9 +1060,16 @@ function dailyAttendanceCheck() {
     Logger.log("⚠ シートが見つかりません"); return;
   }
 
-  // 昨日の日付
+  // 土日はスキップ
+  const today = new Date();
+  const todayDow = today.getDay(); // 0=日, 1=月, ..., 6=土
+  if (todayDow === 0 || todayDow === 6) {
+    Logger.log("土日のためスキップ"); return;
+  }
+
+  // 対象日：月曜日なら金曜日（3日前）、それ以外は昨日
   const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setDate(yesterday.getDate() - (todayDow === 1 ? 3 : 1));
   const yesterdayStr = Utilities.formatDate(yesterday, "Asia/Tokyo", "yyyy/MM/dd");
   const yesterdayDisp = Utilities.formatDate(yesterday, "Asia/Tokyo", "M/d");
 
@@ -1305,11 +1312,16 @@ function noonAttendanceReminder() {
   if (!logSheet || !staffSheet) return;
 
   const today = new Date();
-  const todayStr = Utilities.formatDate(today, "Asia/Tokyo", "yyyy/MM/dd");
-  yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = Utilities.formatDate(yesterday, "Asia/Tokyo", "yyyy/MM/dd");
-  const yesterdayDisp = Utilities.formatDate(yesterday, "Asia/Tokyo", "M/d");
+  const todayDow2 = today.getDay();
+  // 土日はスキップ
+  if (todayDow2 === 0 || todayDow2 === 6) {
+    Logger.log("土日のためスキップ"); return;
+  }
+
+  const yesterday2 = new Date();
+  yesterday2.setDate(yesterday2.getDate() - (todayDow2 === 1 ? 3 : 1));
+  const yesterdayStr = Utilities.formatDate(yesterday2, "Asia/Tokyo", "yyyy/MM/dd");
+  const yesterdayDisp = Utilities.formatDate(yesterday2, "Asia/Tokyo", "M/d");
 
   // ログから今日送信済みの人と回答済みの人を取得
   const logData = logSheet.getDataRange().getValues();
