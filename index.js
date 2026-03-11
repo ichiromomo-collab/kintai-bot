@@ -1717,63 +1717,74 @@ function importKaipokePDF() {
   Logger.log("📄 変換ドキュメントID: " + docId);
 
   // テキスト解析してスケジュール詳細シートに書き込む
-  parseAndWriteSchedule(text);
+  parseAndWriteSchedule(docId);
 }
 
-function parseAndWriteSchedule(text) {
+function parseAndWriteSchedule(docId) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
   if (!sheet) {
     sheet = ss.insertSheet(SCHEDULE_DETAIL_SHEET);
   }
-
-  // シートをクリアして書き直し
   sheet.clearContents();
   sheet.appendRow(["職員名", "日付", "開始", "終了", "区分", "患者名/内容"]);
 
-  const lines = text.split("\n").map(l => l.trim()).filter(l => l);
+  const doc = DocumentApp.openById(docId);
+  const body = doc.getBody();
   const timePattern = /(\d{2}:\d{2})～(\d{2}:\d{2})（(予定|実績)・(医|介|業務)）/;
-  const datePattern = /(\d+\/\d+\([月火水木金土日]\))/g;
-
-  let currentStaff = null;
-  let currentDate = null;
   const rows = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  // テーブルを処理
+  const numChildren = body.getNumChildren();
+  for (let i = 0; i < numChildren; i++) {
+    const child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.TABLE) continue;
 
-    // スタッフ名チェック
-    for (const name of STAFF_LIST) {
-      if (line === name) {
-        currentStaff = name;
-        break;
-      }
+    const table = child.asTable();
+    const numRows = table.getNumRows();
+    if (numRows < 2) continue;
+
+    // ヘッダー行から日付を取得
+    const headerRow = table.getRow(0);
+    const dates = [];
+    for (let c = 0; c < headerRow.getNumCells(); c++) {
+      dates.push(headerRow.getCell(c).getText().trim());
     }
 
-    // 日付チェック
-    const dateMatch = line.match(/^(\d+\/\d+\([月火水木金土日]\))$/);
-    if (dateMatch) {
-      currentDate = dateMatch[1];
-      continue;
-    }
+    // データ行を処理
+    for (let r = 1; r < numRows; r++) {
+      const row = table.getRow(r);
+      const staffName = row.getCell(0).getText().trim();
+      if (!staffName) continue;
 
-    // 時刻チェック
-    const timeMatch = line.match(timePattern);
-    if (timeMatch && currentStaff) {
-      const start = timeMatch[1];
-      const end   = timeMatch[2];
-      const kind  = timeMatch[4];
+      for (let c = 1; c < row.getNumCells(); c++) {
+        const date = dates[c] || "";
+        const cellText = row.getCell(c).getText().trim();
+        if (!cellText) continue;
 
-      // 次の行が患者名
-      const patient = (i + 1 < lines.length && !lines[i+1].match(timePattern) && !STAFF_LIST.includes(lines[i+1]))
-        ? lines[i+1] : "";
-
-      // 日付を特定（時刻行に含まれることもある）
-      const inlineDate = line.match(/(\d+\/\d+\([月火水木金土日]\))/);
-      const date = inlineDate ? inlineDate[1] : currentDate;
-
-      if (date) {
-        rows.push([currentStaff, date, start, end, kind, patient]);
+        const lines = cellText.split("");
+        let j = 0;
+        while (j < lines.length) {
+          const line = lines[j].trim();
+          const m = line.match(timePattern);
+          if (m) {
+            const start = m[1];
+            const end   = m[2];
+            const kind  = m[4];
+            // 同じ行の時刻以降が患者名
+            let patient = line.substring(m.index + m[0].length).trim();
+            // なければ次の行
+            if (!patient && j + 1 < lines.length) {
+              const nextLine = lines[j+1].trim();
+              if (!nextLine.match(timePattern)) {
+                patient = nextLine;
+                j++;
+              }
+            }
+            rows.push([staffName, date, start, end, kind, patient]);
+          }
+          j++;
+        }
       }
     }
   }
@@ -1782,6 +1793,6 @@ function parseAndWriteSchedule(text) {
     sheet.getRange(2, 1, rows.length, 6).setValues(rows);
     Logger.log("✅ " + rows.length + "件書き込み完了");
   } else {
-    Logger.log("⚠ データが取得できませんでした。テキストを確認してください。");
+    Logger.log("⚠ データが取得できませんでした");
   }
 }
