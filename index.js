@@ -1792,6 +1792,8 @@ function parseAndWriteSchedule(docId) {
   } else {
     Logger.log("⚠ テーブルデータが取得できませんでした");
   }
+  }
+
   function testSimplePost() {
   const result = callSlackApi("chat.postMessage", {
     channel: TODAY_CHANNEL,
@@ -1799,4 +1801,5 @@ function parseAndWriteSchedule(docId) {
   });
   Logger.log(JSON.stringify(result));
 }
-}
+
+
