@@ -109,12 +109,36 @@ function doPost(e) {
 
     // --- 勤怠確認：できてます ---
     if (action === "attendance_ok") {
+      const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+      // メッセージを「確認済み」に更新してボタンを消す
+      callSlackApi("chat.update", {
+        channel: payload.channel?.id,
+        ts: payload.message?.ts,
+        text: `✅ ${staffName} さん（${dateStr}）打刻確認済み`,
+        blocks: [{
+          type: "section",
+          text: { type: "mrkdwn", text: `✅ *${staffName} さん*
+${dateStr} の勤怠打刻を確認しました。` }
+        }]
+      });
       return ContentService.createTextOutput("")
         .setMimeType(ContentService.MimeType.TEXT);
     }
 
     // --- 勤怠確認：できてません ---
     if (action === "attendance_ng") {
+      const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+      // メッセージを更新してボタンを消す
+      callSlackApi("chat.update", {
+        channel: payload.channel?.id,
+        ts: payload.message?.ts,
+        text: `❌ ${staffName} さん（${dateStr}）打刻未完了`,
+        blocks: [{
+          type: "section",
+          text: { type: "mrkdwn", text: `❌ *${staffName} さん*
+${dateStr} の勤怠打刻が未完了です。管理者に連絡済み。` }
+        }]
+      });
       handleAttendanceNG(payload);
       return ContentService.createTextOutput(JSON.stringify({ text: "" }))
         .setMimeType(ContentService.MimeType.JSON);
