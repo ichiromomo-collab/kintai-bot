@@ -803,7 +803,7 @@ function handleOvertimeApprove(payload) {
 // ====== 分変換ユーティリティ ======
 function toMinutes(v) {
   try {
-    if (v instanceof Date) return v.getHours() * 60 + v.getMinutes();
+    if (v instanceof Date) { const hhmm = Utilities.formatDate(v, "Asia/Tokyo", "HH:mm"); const [h,m] = hhmm.split(":").map(Number); return h*60+m; }
     if (typeof v === "string") {
       const [h, m] = v.split(":").map(Number);
       return h * 60 + m;
@@ -821,8 +821,11 @@ function minutesToHHMM(min) {
 function timeToMinutes(timeStr) {
   if (!timeStr) return 0;
   // DateオブジェクトはGoogleスプレッドシートが時刻として認識している場合
+  // getHours()はUTCになるためformatDateで日本時間に変換する
   if (timeStr instanceof Date) {
-    return timeStr.getHours() * 60 + timeStr.getMinutes();
+    const hhmm = Utilities.formatDate(timeStr, "Asia/Tokyo", "HH:mm");
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m;
   }
   const [h, m] = String(timeStr).split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
