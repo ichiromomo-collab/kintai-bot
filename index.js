@@ -1396,6 +1396,7 @@ function noonAttendanceReminder() {
 
 // ===== 設定：今日のおむすびチャンネル =====
 const TODAY_CHANNEL = PropertiesService.getScriptProperties().getProperty("TODAY_CHANNEL");
+const OMUSUBI_LOG_SHEET = "今日のおむすびログ";
 
 // スタッフ定義
 const STAFF_CONFIG = [
@@ -1484,11 +1485,17 @@ function postTodayOmusubi() {
     blocks.push({ type: "divider" });
   });
 
-  callSlackApi("chat.postMessage", {
+  // tsを保存してステータスシート初期化
+  const result = callSlackApi("chat.postMessage", {
     channel: TODAY_CHANNEL,
     text: `📋 今日のおむすび（${todayDisp}）`,
     blocks
   });
+
+  if (result?.ok) {
+    const ts = result.message?.ts || result.ts || "";
+    initOmusubiLog(todayStr, ts);
+  }
 
   Logger.log("✅ 今日のおむすび投稿完了");
 }
@@ -1496,19 +1503,22 @@ function postTodayOmusubi() {
 
 // ===== ステータス・緊急携帯ボタン処理 =====
 function handleTodayStatus(payload) {
-  const action    = payload.actions?.[0]?.action_id || "";
-  const presser   = payload.user?.name || payload.user?.username || "unknown";
-  const nowStr    = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
+  const action  = payload.actions?.[0]?.action_id || "";
+  const nowStr  = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
+  const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
 
   // 緊急携帯
   if (action.startsWith("oncall_")) {
     const personName = payload.actions?.[0]?.value || "";
+    updateOmusubiLog(todayStr, "oncall", personName);
+    updateOmusubiMessage(todayStr);
+    // ログとして流す
     callSlackApi("chat.postMessage", {
       channel: TODAY_CHANNEL,
       text: `📱 緊急携帯当番：${personName}`,
-      blocks: [{
-        type: "section",
-        text: { type: "mrkdwn", text: `📱 *緊急携帯当番*\n${nowStr} 現在：*${personName}* が担当します` }
+      blocks: [{ type: "section",
+        text: { type: "mrkdwn", text: `📱 *緊急携帯当番*
+${nowStr} 現在：*${personName}* が担当します` }
       }]
     });
     return;
@@ -1517,13 +1527,260 @@ function handleTodayStatus(payload) {
   // ステータス変更
   if (action.startsWith("status_")) {
     const { staffName, status } = JSON.parse(payload.actions?.[0]?.value || "{}");
+    updateOmusubiLog(todayStr, staffName, status);
+    updateOmusubiMessage(todayStr);
+    // ログとして流す
     callSlackApi("chat.postMessage", {
       channel: TODAY_CHANNEL,
       text: `${status}　${staffName}`,
-      blocks: [{
-        type: "section",
-        text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
+      blocks: [{ type: "section",
+        text: { type: "mrkdwn", text: `${status}　*${staffName}*
+（${nowStr} 更新）` }
       }]
     });
+  }
+}
+
+// ===== おむすびログ初期化 =====
+function initOmusubiLog(todayStr, ts) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(OMUSUBI_LOG_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(OMUSUBI_LOG_SHEET);
+    sheet.appendRow(["日付", "メッセージts", "oncall", ...STAFF_CONFIG.map(s => s.name)]);
+    sheet.setFrozenRows(1);
+  }
+  // 今日の行を追加
+  const row = [todayStr, ts, "未定", ...STAFF_CONFIG.map(() => "")];
+  sheet.appendRow(row);
+  Logger.log("✅ おむすびログ初期化: " + todayStr);
+}
+
+// ===== おむすびログ更新 =====
+function updateOmusubiLog(todayStr, key, value) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(OMUSUBI_LOG_SHEET);
+  if (!sheet) return;
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const colIndex = headers.indexOf(key);
+  if (colIndex < 0) return;
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === todayStr) {
+      sheet.getRange(i + 1, colIndex + 1).setValue(value);
+      return;
+    }
+  }
+}
+
+// ===== おむすびメッセージ更新 =====
+function updateOmusubiMessage(todayStr) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(OMUSUBI_LOG_SHEET);
+  if (!sheet) return;
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  let ts = "", oncall = "未定", statusMap = {};
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === todayStr) {
+      ts = String(data[i][1]);
+      oncall = String(data[i][2]) || "未定";
+      STAFF_CONFIG.forEach(staff => {
+        const col = headers.indexOf(staff.name);
+        if (col >= 0) statusMap[staff.name] = String(data[i][col]) || "";
+      });
+      break;
+    }
+  }
+
+  if (!ts) return;
+
+  const todayDisp = Utilities.formatDate(new Date(), "Asia/Tokyo", "M/d(E)");
+  const nowStr    = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
+
+  // スタッフ一覧テキスト生成
+  const staffLines = STAFF_CONFIG.map(staff => {
+    const s = statusMap[staff.name] || "－";
+    return `${s || "－"}　${staff.name}`;
+  }).join("");
+
+  const blocks = [
+    { type: "header", text: { type: "plain_text", text: `📋 今日のおむすび（${todayDisp}）`, emoji: true } },
+    { type: "divider" },
+    { type: "section", text: { type: "mrkdwn",
+      text: `📱 *緊急携帯：${oncall}*
+
+👥 *スタッフ状況*（${nowStr} 更新）
+${staffLines}`
+    }},
+    { type: "divider" },
+    { type: "section", text: { type: "mrkdwn", text: "📱 *緊急携帯当番を選んでください*" }},
+    { type: "actions", elements: [
+      { type: "button", text: { type: "plain_text", text: "川畑さん", emoji: true }, action_id: "oncall_kawabata", value: "川畑 麻衣子" },
+      { type: "button", text: { type: "plain_text", text: "岩崎さん",  emoji: true }, action_id: "oncall_iwasaki",  value: "岩崎 里沙" }
+    ]},
+    { type: "divider" }
+  ];
+
+  // ステータスボタン
+  STAFF_CONFIG.forEach(staff => {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス` }});
+    let buttons = [];
+    if (staff.type === "nurse") {
+      buttons = [
+        { text: "🏥 訪問開始", action_id: "status_visit_start" },
+        { text: "🚗 移動中",   action_id: "status_moving" },
+        { text: "✅ 空き",     action_id: "status_free" },
+      ];
+    } else if (staff.type === "office") {
+      buttons = [
+        { text: "🏢 事務所",   action_id: "status_office" },
+        { text: "🚗 外出中",   action_id: "status_out" },
+        { text: "✅ 空き",     action_id: "status_free" },
+      ];
+    } else {
+      buttons = [
+        { text: "📊 営業中",   action_id: "status_sales" },
+        { text: "🏢 事務所",   action_id: "status_office" },
+        { text: "🚗 外出中",   action_id: "status_out" },
+        { text: "✅ 空き",     action_id: "status_free" },
+      ];
+    }
+    blocks.push({ type: "actions", elements: buttons.map(b => ({
+      type: "button",
+      text: { type: "plain_text", text: b.text, emoji: true },
+      action_id: b.action_id + "_" + staff.name.replace(/\s/g, "_"),
+      value: JSON.stringify({ staffName: staff.name, status: b.text })
+    }))});
+    blocks.push({ type: "divider" });
+  });
+
+  callSlackApi("chat.update", {
+    channel: TODAY_CHANNEL,
+    ts,
+    text: `📋 今日のおむすび（${todayDisp}）`,
+    blocks
+  });
+}
+
+
+// ===== カイポケPDF→スケジュール詳細シート変換 =====
+const KAIPOKE_FOLDER_ID = "1HCI8dn5IxizqTQ4lMSUnIV5rUSQrGDlO";
+const SCHEDULE_DETAIL_SHEET = "スケジュール詳細";
+
+const STAFF_LIST = ["米須 珠美", "岩崎 里沙", "川畑 麻衣子", "今村 俊貴", "知念 美穂", "仲村渠 長代", "新垣 早紀", "入谷 京子"];
+
+function importKaipokePDF() {
+  const folder = DriveApp.getFolderById(KAIPOKE_FOLDER_ID);
+  const files = folder.getFilesByType(MimeType.PDF);
+
+  if (!files.hasNext()) {
+    Logger.log("❌ PDFが見つかりません");
+    return;
+  }
+
+  // 最新のPDFを取得
+  let latestFile = null;
+  let latestDate = new Date(0);
+  while (files.hasNext()) {
+    const f = files.next();
+    if (f.getDateCreated() > latestDate) {
+      latestDate = f.getDateCreated();
+      latestFile = f;
+    }
+  }
+
+  Logger.log("📄 変換対象: " + latestFile.getName());
+
+  // PDFをGoogleドキュメントに変換（DriveApp経由）
+  const blob = latestFile.getBlob().setContentType(MimeType.PDF);
+  const docFile = DriveApp.getFolderById(KAIPOKE_FOLDER_ID).createFile(blob);
+  const converted = Drive.Files.copy(
+    { title: latestFile.getName() + "_converted", mimeType: MimeType.GOOGLE_DOCS },
+    docFile.getId(),
+    { convert: true }
+  );
+  const docId = converted.id;
+  docFile.setTrashed(true); // コピー元を削除
+
+  // テキスト取得
+  const doc = DocumentApp.openById(docId);
+  const text = doc.getBody().getText();
+  Logger.log("📝 テキスト取得完了 (" + text.length + "文字)");
+
+  // 変換したドキュメントを削除（不要なので）
+  DriveApp.getFileById(docId).setTrashed(true);
+
+  // テキスト解析してスケジュール詳細シートに書き込む
+  parseAndWriteSchedule(text);
+}
+
+function parseAndWriteSchedule(text) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(SCHEDULE_DETAIL_SHEET);
+  }
+
+  // シートをクリアして書き直し
+  sheet.clearContents();
+  sheet.appendRow(["職員名", "日付", "開始", "終了", "区分", "患者名/内容"]);
+
+  const lines = text.split("\n").map(l => l.trim()).filter(l => l);
+  const timePattern = /(\d{2}:\d{2})～(\d{2}:\d{2})（(予定|実績)・(医|介|業務)）/;
+  const datePattern = /(\d+\/\d+\([月火水木金土日]\))/g;
+
+  let currentStaff = null;
+  let currentDate = null;
+  const rows = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // スタッフ名チェック
+    for (const name of STAFF_LIST) {
+      if (line === name) {
+        currentStaff = name;
+        break;
+      }
+    }
+
+    // 日付チェック
+    const dateMatch = line.match(/^(\d+\/\d+\([月火水木金土日]\))$/);
+    if (dateMatch) {
+      currentDate = dateMatch[1];
+      continue;
+    }
+
+    // 時刻チェック
+    const timeMatch = line.match(timePattern);
+    if (timeMatch && currentStaff) {
+      const start = timeMatch[1];
+      const end   = timeMatch[2];
+      const kind  = timeMatch[4];
+
+      // 次の行が患者名
+      const patient = (i + 1 < lines.length && !lines[i+1].match(timePattern) && !STAFF_LIST.includes(lines[i+1]))
+        ? lines[i+1] : "";
+
+      // 日付を特定（時刻行に含まれることもある）
+      const inlineDate = line.match(/(\d+\/\d+\([月火水木金土日]\))/);
+      const date = inlineDate ? inlineDate[1] : currentDate;
+
+      if (date) {
+        rows.push([currentStaff, date, start, end, kind, patient]);
+      }
+    }
+  }
+
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+    Logger.log("✅ " + rows.length + "件書き込み完了");
+  } else {
+    Logger.log("⚠ データが取得できませんでした。テキストを確認してください。");
   }
 }
