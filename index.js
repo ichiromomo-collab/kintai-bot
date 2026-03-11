@@ -1131,6 +1131,7 @@ function dailyAttendanceCheck() {
         }
       ]
     });
+    logAttendanceCheck(staffName, yesterdayStr, "送信済み");
   });
 
   Logger.log(`✅ 勤怠確認ボタン送信完了: ${workedStaff.size}名`);
@@ -1161,7 +1162,7 @@ function dailyAttendanceCheck() {
 *スタッフ：* ${row[1]}
 *対象日：* ${row[0]}
 
-まだ修正が完了していません。対応をお願いします。\n\nマネーフォワードで申請後、「修正完了」ボタンを押してください。`
+まだ修正が完了していません。対応をお願いします。マネーフォワードで申請後、修正完了ボタンを押してください。`
             }
           },
           {
@@ -1195,7 +1196,7 @@ function handleAttendanceNG(payload) {
       {
         type: "section",
         text: { type: "mrkdwn",
-          text: `⚠️ *勤怠修正申請が必要です*\n\n${dateStr} の打刻が未完了です。\n\n👉 マネーフォワードで修正申請をしてください。\n\nマネーフォワードで申請したら、こちらの「修正しました」ボタンを押してください`
+          text: `⚠️ *勤怠修正申請が必要です*\n\n${dateStr} の打刻が未完了です。\n\n👉 マネーフォワードで修正申請をしてください。`
         }
       },
       {
@@ -1293,4 +1294,83 @@ function handleAttendanceFixed(payload) {
   } catch(err) {
     Logger.log("💥 handleAttendanceFixed ERROR: " + err);
   }
+}
+
+
+// ===== 昼12時：未回答者に再送 =====
+function noonAttendanceReminder() {
+  const ss        = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const logSheet  = ss.getSheetByName(ATTENDANCE_LOG_SHEET);
+  const staffSheet = ss.getSheetByName("スタッフマスタ");
+  if (!logSheet || !staffSheet) return;
+
+  const today = new Date();
+  const todayStr = Utilities.formatDate(today, "Asia/Tokyo", "yyyy/MM/dd");
+  yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = Utilities.formatDate(yesterday, "Asia/Tokyo", "yyyy/MM/dd");
+  const yesterdayDisp = Utilities.formatDate(yesterday, "Asia/Tokyo", "M/d");
+
+  // ログから今日送信済みの人と回答済みの人を取得
+  const logData = logSheet.getDataRange().getValues();
+  logData.shift();
+
+  const sentStaff    = new Set();
+  const answeredStaff = new Set();
+
+  logData.forEach(row => {
+    const dateStr = String(row[0]);
+    const name    = String(row[1]);
+    const answer  = String(row[2]);
+    if (dateStr !== yesterdayStr) return;
+    if (answer === "送信済み") sentStaff.add(name);
+    if (["できてます", "できてません", "できてます（残業許可申請済み）"].includes(answer)) {
+      answeredStaff.add(name);
+    }
+  });
+
+  // 未回答者を抽出して再送
+  sentStaff.forEach(staffName => {
+    if (answeredStaff.has(staffName)) return;
+
+    callSlackApi("chat.postMessage", {
+      channel: CHANNEL_ID,
+      text: `🔔 ${staffName} さん、勤怠確認の回答をお願いします`,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn",
+            text: `🔔 *${staffName} さんへ*\n\n昨日（${yesterdayDisp}）の勤怠確認がまだ回答されていません。\n以下のボタンを押してください。`
+          }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "✅ できてます", emoji: true },
+              style: "primary",
+              action_id: "attendance_ok",
+              value: JSON.stringify({ staffName, dateStr: yesterdayStr })
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "🔖 できてます（残業許可申請済み）", emoji: true },
+              action_id: "attendance_overtime_ok",
+              value: JSON.stringify({ staffName, dateStr: yesterdayStr })
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "❌ できてません", emoji: true },
+              style: "danger",
+              action_id: "attendance_ng",
+              value: JSON.stringify({ staffName, dateStr: yesterdayStr })
+            }
+          ]
+        }
+      ]
+    });
+
+    Logger.log(`🔔 未回答再送: ${staffName}`);
+  });
 }
