@@ -116,6 +116,12 @@ function doPost(e) {
       return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
     }
 
+    // --- 今日のおむすび：緊急携帯・ステータス ---
+    if (action.startsWith("oncall_") || action.startsWith("status_")) {
+      handleTodayStatus(payload);
+      return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
+    }
+
     // --- 勤怠確認：できてます（残業許可申請済み）---
     if (action === "attendance_overtime_ok") {
       const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
@@ -1385,4 +1391,139 @@ function noonAttendanceReminder() {
 
     Logger.log(`🔔 未回答再送: ${staffName}`);
   });
+}
+
+
+// ===== 設定：今日のおむすびチャンネル =====
+const TODAY_CHANNEL = PropertiesService.getScriptProperties().getProperty("TODAY_CHANNEL");
+
+// スタッフ定義
+const STAFF_CONFIG = [
+  { name: "川畑 麻衣子", type: "nurse" },
+  { name: "岩崎 里沙",   type: "nurse" },
+  { name: "仲村渠 長代", type: "nurse" },
+  { name: "今村 俊貴",   type: "nurse" },
+  { name: "知念 美穂",   type: "office" },
+  { name: "米須 珠美",   type: "sales"  },
+];
+
+// ===== 毎朝：今日のおむすび投稿 =====
+function postTodayOmusubi() {
+  const today = new Date();
+  const todayDisp = Utilities.formatDate(today, "Asia/Tokyo", "M/d(E)");
+
+  const blocks = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: `📋 今日のおむすび（${todayDisp}）`, emoji: true }
+    },
+    { type: "divider" },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: "📱 *緊急携帯当番を選んでください*" }
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "川畑さん", emoji: true },
+          action_id: "oncall_kawabata",
+          value: "川畑 麻衣子"
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "岩崎さん", emoji: true },
+          action_id: "oncall_iwasaki",
+          value: "岩崎 里沙"
+        }
+      ]
+    },
+    { type: "divider" }
+  ];
+
+  // スタッフごとのステータスボタン
+  STAFF_CONFIG.forEach(staff => {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス` }
+    });
+
+    let buttons = [];
+    if (staff.type === "nurse") {
+      buttons = [
+        { text: "🏥 訪問開始", action_id: "status_visit_start", value: staff.name },
+        { text: "🚗 移動中",   action_id: "status_moving",      value: staff.name },
+        { text: "✅ 空き",     action_id: "status_free",        value: staff.name },
+      ];
+    } else if (staff.type === "office") {
+      buttons = [
+        { text: "🏢 事務所",   action_id: "status_office",  value: staff.name },
+        { text: "🚗 外出中",   action_id: "status_out",     value: staff.name },
+        { text: "✅ 空き",     action_id: "status_free",    value: staff.name },
+      ];
+    } else if (staff.type === "sales") {
+      buttons = [
+        { text: "📊 営業中",   action_id: "status_sales",   value: staff.name },
+        { text: "🏢 事務所",   action_id: "status_office",  value: staff.name },
+        { text: "🚗 外出中",   action_id: "status_out",     value: staff.name },
+        { text: "✅ 空き",     action_id: "status_free",    value: staff.name },
+      ];
+    }
+
+    blocks.push({
+      type: "actions",
+      elements: buttons.map(b => ({
+        type: "button",
+        text: { type: "plain_text", text: b.text, emoji: true },
+        action_id: b.action_id + "_" + staff.name.replace(/\s/g, ""),
+        value: JSON.stringify({ staffName: staff.name, status: b.text })
+      }))
+    });
+
+    blocks.push({ type: "divider" });
+  });
+
+  callSlackApi("chat.postMessage", {
+    channel: TODAY_CHANNEL,
+    text: `📋 今日のおむすび（${todayDisp}）`,
+    blocks
+  });
+
+  Logger.log("✅ 今日のおむすび投稿完了");
+}
+
+
+// ===== ステータス・緊急携帯ボタン処理 =====
+function handleTodayStatus(payload) {
+  const action    = payload.actions?.[0]?.action_id || "";
+  const presser   = payload.user?.name || payload.user?.username || "unknown";
+  const nowStr    = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
+
+  // 緊急携帯
+  if (action.startsWith("oncall_")) {
+    const personName = payload.actions?.[0]?.value || "";
+    callSlackApi("chat.postMessage", {
+      channel: TODAY_CHANNEL,
+      text: `📱 緊急携帯当番：${personName}`,
+      blocks: [{
+        type: "section",
+        text: { type: "mrkdwn", text: `📱 *緊急携帯当番*\n${nowStr} 現在：*${personName}* が担当します` }
+      }]
+    });
+    return;
+  }
+
+  // ステータス変更
+  if (action.startsWith("status_")) {
+    const { staffName, status } = JSON.parse(payload.actions?.[0]?.value || "{}");
+    callSlackApi("chat.postMessage", {
+      channel: TODAY_CHANNEL,
+      text: `${status}　${staffName}`,
+      blocks: [{
+        type: "section",
+        text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
+      }]
+    });
+  }
 }
