@@ -10,6 +10,7 @@ const OVERTIME_SHEET    = "残業申請ログ";
 const SCHEDULE_SHEET_OT = "スケジュール";
 const MANAGER_ID_1      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_1");
 const MANAGER_ID_2      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_2");
+const MANAGER_ID_3      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_3");
 
 
 // ===== Slackにボタン送信（テスト用） =====
@@ -109,6 +110,41 @@ function doPost(e) {
     }
 
     // --- 勤怠確認：できてます ---
+    // --- 勤怠修正完了ボタン ---
+    if (action === "attendance_fixed") {
+      handleAttendanceFixed(payload);
+      return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
+    }
+
+    // --- 勤怠確認：できてます（残業許可申請済み）---
+    if (action === "attendance_overtime_ok") {
+      const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+      callSlackApi("chat.update", {
+        channel: payload.channel?.id,
+        ts: payload.message?.ts,
+        text: `🔖 ${staffName} さん（${dateStr}）残業許可申請済み`,
+        blocks: [{ type: "section", text: { type: "mrkdwn",
+          text: `🔖 *${staffName} さん*
+${dateStr} の勤怠打刻確認済み（残業許可申請済み）` }}]
+      });
+      logAttendanceCheck(staffName, dateStr, "できてます（残業許可申請済み）");
+      const managerIds = [MANAGER_ID_1, MANAGER_ID_2, MANAGER_ID_3].filter(Boolean);
+      managerIds.forEach(mid => {
+        callSlackApi("chat.postMessage", {
+          channel: mid,
+          text: `🔖 残業許可申請済みの報告`,
+          blocks: [{ type: "section", text: { type: "mrkdwn",
+            text: `🔖 *残業許可申請済みの報告*
+
+*スタッフ：* ${staffName}
+*対象日：* ${dateStr}
+
+本人から「残業許可申請済み」と回答がありました。` }}]
+        });
+      });
+      return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
+    }
+
     if (action === "attendance_ok") {
       const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
       // メッセージを「確認済み」に更新してボタンを消す
@@ -522,7 +558,7 @@ function setupAttendanceLogSheet() {
   let sheet = ss.getSheetByName(ATTENDANCE_LOG_SHEET);
   if (!sheet) {
     sheet = ss.insertSheet(ATTENDANCE_LOG_SHEET);
-    sheet.appendRow(["対象日", "スタッフ名", "回答", "回答日時"]);
+    sheet.appendRow(["対象日", "スタッフ名", "回答", "回答日時", "修正者"]);
     sheet.setFrozenRows(1);
     Logger.log("✅ 勤怠確認ログシート作成完了");
   }
@@ -1080,6 +1116,12 @@ function dailyAttendanceCheck() {
             },
             {
               type: "button",
+              text: { type: "plain_text", text: "🔖 できてます（残業許可申請済み）", emoji: true },
+              action_id: "attendance_overtime_ok",
+              value: JSON.stringify({ staffName, staffId: staff.id, dateStr: yesterdayStr })
+            },
+            {
+              type: "button",
               text: { type: "plain_text", text: "❌ できてません", emoji: true },
               style: "danger",
               action_id: "attendance_ng",
@@ -1092,6 +1134,50 @@ function dailyAttendanceCheck() {
   });
 
   Logger.log(`✅ 勤怠確認ボタン送信完了: ${workedStaff.size}名`);
+
+  // 未解決の「できてません」を再催促
+  const ss2 = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const logSheet2 = ss2.getSheetByName(ATTENDANCE_LOG_SHEET);
+  if (!logSheet2) return;
+  const logData = logSheet2.getDataRange().getValues();
+  logData.shift();
+  logData.forEach(row => {
+    if (row[2] !== "できてません") return;
+    // 修正完了になっているか確認
+    const isFixed = logData.some(r => r[0] === row[0] && r[1] === row[1] && r[2] === "修正完了");
+    if (isFixed) return;
+    // 管理者に再催促DM
+    const managerIds = [MANAGER_ID_1, MANAGER_ID_2, MANAGER_ID_3].filter(Boolean);
+    managerIds.forEach(mid => {
+      callSlackApi("chat.postMessage", {
+        channel: mid,
+        text: `🔁 勤怠未修正の再催促`,
+        blocks: [
+          {
+            type: "section",
+            text: { type: "mrkdwn",
+              text: `🔁 *勤怠未修正の再催促*
+
+*スタッフ：* ${row[1]}
+*対象日：* ${row[0]}
+
+まだ修正が完了していません。対応をお願いします。`
+            }
+          },
+          {
+            type: "actions",
+            elements: [{
+              type: "button",
+              text: { type: "plain_text", text: "✅ 修正完了", emoji: true },
+              style: "primary",
+              action_id: "attendance_fixed",
+              value: JSON.stringify({ staffName: row[1], dateStr: row[0] })
+            }]
+          }
+        ]
+      });
+    });
+  });
 }
 
 
@@ -1101,23 +1187,32 @@ function handleAttendanceNG(payload) {
   const presserName = payload.user?.name || payload.user?.username || "unknown";
   const presserUserId = payload.user?.id || "";
 
-  // 押した本人にだけephemeralで修正申請の案内を送る
-  callSlackApi("chat.postEphemeral", {
-    channel: CHANNEL_ID,
-    user: presserUserId,
+  // 押した本人にDMで修正申請の案内を送る（ボタン付き）
+  callSlackApi("chat.postMessage", {
+    channel: presserUserId,
     text: "勤怠修正申請のご案内",
     blocks: [
       {
         type: "section",
         text: { type: "mrkdwn",
-          text: `⚠️ *勤怠修正申請が必要です*\n\n${dateStr} の打刻が未完了です。\n以下の内容を管理者（川畑さん・岩崎さん）にご連絡ください。\n\n📝 *連絡内容の例：*\n「${dateStr} の出勤／退勤時刻が〇〇:〇〇でした。修正をお願いします。」\n\n👉 <#${CHANNEL_ID}> または直接DMでご連絡ください。`
+          text: `⚠️ *勤怠修正申請が必要です*\n\n${dateStr} の打刻が未完了です。\n以下の内容を管理者（川畑さん・岩崎さん）にご連絡ください。\n\n📝 *連絡内容の例：*\n「${dateStr} の出勤／退勤時刻が〇〇:〇〇でした。マネーフォワードで理由の記入と修正申請をお願いします。」\n\n👉 <#${CHANNEL_ID}> または直接DMでご連絡ください。`
         }
+      },
+      {
+        type: "actions",
+        elements: [{
+          type: "button",
+          text: { type: "plain_text", text: "✅ 修正しました", emoji: true },
+          style: "primary",
+          action_id: "attendance_fixed",
+          value: JSON.stringify({ staffName, staffId, dateStr })
+        }]
       }
     ]
   });
 
   // 管理者にDMで通知
-  const managerIds = [MANAGER_ID_1, MANAGER_ID_2].filter(Boolean);
+  const managerIds = [MANAGER_ID_1, MANAGER_ID_2, MANAGER_ID_3].filter(Boolean);
   managerIds.forEach(managerId => {
     callSlackApi("chat.postMessage", {
       channel: managerId,
@@ -1142,7 +1237,7 @@ function logAttendanceCheck(staffName, dateStr, answer) {
     let sheet = ss.getSheetByName(ATTENDANCE_LOG_SHEET);
     if (!sheet) {
       sheet = ss.insertSheet(ATTENDANCE_LOG_SHEET);
-      sheet.appendRow(["対象日", "スタッフ名", "回答", "回答日時"]);
+      sheet.appendRow(["対象日", "スタッフ名", "回答", "回答日時", "修正者"]);
       sheet.setFrozenRows(1);
     }
     const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm");
@@ -1150,5 +1245,52 @@ function logAttendanceCheck(staffName, dateStr, answer) {
     Logger.log(`✅ 勤怠確認ログ記録: ${staffName} / ${answer}`);
   } catch(err) {
     Logger.log("💥 logAttendanceCheck ERROR: " + err);
+  }
+}
+
+
+// ===== 「修正完了」ボタン処理 =====
+function handleAttendanceFixed(payload) {
+  try {
+    const { staffName, staffId, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+    const approverName = payload.user?.name || payload.user?.username || "管理者";
+    const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm");
+
+    // ログに修正完了を記録
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const logSheet = ss.getSheetByName(ATTENDANCE_LOG_SHEET);
+    if (logSheet) {
+      // 既存の「できてません」行を探して修正完了に更新
+      const data = logSheet.getDataRange().getValues();
+      let updated = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === dateStr && data[i][1] === staffName && data[i][2] === "できてません") {
+          logSheet.getRange(i + 1, 3).setValue("修正完了");
+          logSheet.getRange(i + 1, 5).setValue(`${approverName}（${nowStr}）`);
+          updated = true;
+          break;
+        }
+      }
+      if (!updated) {
+        logSheet.appendRow([dateStr, staffName, "修正完了", nowStr, approverName]);
+      }
+    }
+
+    // DMのメッセージを更新してボタンを消す
+    callSlackApi("chat.update", {
+      channel: payload.channel?.id,
+      ts: payload.message?.ts,
+      text: `✅ ${staffName} さん（${dateStr}）修正完了`,
+      blocks: [{
+        type: "section",
+        text: { type: "mrkdwn",
+          text: `✅ *${staffName} さん（${dateStr}）の勤怠修正完了*\n対応者：${approverName}（${nowStr}）`
+        }
+      }]
+    });
+
+    Logger.log(`✅ 勤怠修正完了: ${staffName} / ${dateStr} / 対応: ${approverName}`);
+  } catch(err) {
+    Logger.log("💥 handleAttendanceFixed ERROR: " + err);
   }
 }
