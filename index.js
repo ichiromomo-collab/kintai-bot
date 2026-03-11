@@ -1395,7 +1395,7 @@ function noonAttendanceReminder() {
 
 
 // ===== 設定：今日のおむすびチャンネル =====
-const TODAY_CHANNEL ="C0AKRKRLCQ5";
+const TODAY_CHANNEL = PropertiesService.getScriptProperties().getProperty("TODAY_CHANNEL");
 
 // スタッフ定義
 const STAFF_CONFIG = [
@@ -1476,7 +1476,7 @@ function postTodayOmusubi() {
       elements: buttons.map(b => ({
         type: "button",
         text: { type: "plain_text", text: b.text, emoji: true },
-        action_id: b.action_id + "_" + staff.name.replace(/\s/g, ""),
+        action_id: b.action_id + "_" + staff.name.replace(/\s/g, "_"),
         value: JSON.stringify({ staffName: staff.name, status: b.text })
       }))
     });
