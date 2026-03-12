@@ -1059,15 +1059,71 @@ ${nowStr} 現在：*${personName}* が担当します` }
     const { staffName, status } = JSON.parse(payload.actions?.[0]?.value || "{}");
     updateOmusubiLog(todayStr, staffName, status);
     updateOmusubiMessage(todayStr);
-    // ログとして流す
-    callSlackApi("chat.postMessage", {
-      channel: TODAY_CHANNEL,
-      text: `${status}　${staffName}`,
-      blocks: [{ type: "section",
-        text: { type: "mrkdwn", text: `${status}　*${staffName}*
-（${nowStr} 更新）` }
-      }]
+
+    // 訪問開始の場合はスケジュール一覧も投稿
+    if (action.startsWith("status_visit_start")) {
+      const scheduleLines = getTodaySchedule(staffName, todayStr);
+      const scheduleText = scheduleLines.length > 0
+        ? scheduleLines.map(r => `　• ${r.start}〜${r.end}　${r.patient}${r.kind ? "（"+r.kind+"）" : ""}`).join("\n")
+        : "　（スケジュールなし）";
+      const currentPatient = scheduleLines.length > 0 ? scheduleLines[0].patient : "";
+
+      callSlackApi("chat.postMessage", {
+        channel: TODAY_CHANNEL,
+        text: `🏥 訪問開始：${staffName}`,
+        blocks: [{ type: "section",
+          text: { type: "mrkdwn",
+            text: `🏥 *${staffName}* 訪問開始${currentPatient ? "：" + currentPatient + "さん" : ""}\n（${nowStr} 更新）\n\n*本日のスケジュール：*\n${scheduleText}`
+          }
+        }]
+      });
+    } else {
+      // 通常ステータス変更ログ
+      callSlackApi("chat.postMessage", {
+        channel: TODAY_CHANNEL,
+        text: `${status}　${staffName}`,
+        blocks: [{ type: "section",
+          text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
+        }]
+      });
+    }
+  }
+}
+
+// ===== 今日のスケジュール取得 =====
+function getTodaySchedule(staffName, todayStr) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
+    if (!sheet) return [];
+
+    const data = sheet.getDataRange().getValues();
+    data.shift(); // ヘッダー除去
+
+    const rows = [];
+    data.forEach(row => {
+      const name = String(row[0]).trim();
+      let dateStr;
+      if (row[1] instanceof Date) {
+        dateStr = Utilities.formatDate(row[1], "Asia/Tokyo", "yyyy/MM/dd");
+      } else {
+        dateStr = String(row[1]).trim();
+      }
+      if (name !== staffName || dateStr !== todayStr) return;
+
+      const start   = row[2] instanceof Date ? Utilities.formatDate(row[2], "Asia/Tokyo", "HH:mm") : String(row[2]).trim();
+      const end     = row[3] instanceof Date ? Utilities.formatDate(row[3], "Asia/Tokyo", "HH:mm") : String(row[3]).trim();
+      const kind    = String(row[4]).trim();
+      const patient = String(row[5]).trim();
+      rows.push({ start, end, kind, patient });
     });
+
+    // 開始時刻でソート
+    rows.sort((a, b) => a.start.localeCompare(b.start));
+    return rows;
+  } catch(err) {
+    Logger.log("💥 getTodaySchedule ERROR: " + err);
+    return [];
   }
 }
 
@@ -1132,11 +1188,22 @@ function updateOmusubiMessage(todayStr) {
   const todayDisp = Utilities.formatDate(new Date(), "Asia/Tokyo", "M/d(E)");
   const nowStr    = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
 
-  // スタッフ一覧テキスト生成
+  // スタッフ一覧テキスト生成（訪問開始の場合は患者名も表示）
   const staffLines = STAFF_CONFIG.map(staff => {
     const s = statusMap[staff.name] || "－";
+    if (s && s.includes("訪問")) {
+      const todaySchedule = getTodaySchedule(staff.name, todayStr);
+      const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+      const current = todaySchedule.find(r => {
+        const [sh, sm] = r.start.split(":").map(Number);
+        const [eh, em] = r.end.split(":").map(Number);
+        return (sh * 60 + sm) <= nowMin && nowMin <= (eh * 60 + em);
+      }) || todaySchedule[0];
+      const patientInfo = current ? `（${current.patient}さん）` : "";
+      return `🏥 訪問中${patientInfo}　${staff.name}`;
+    }
     return `${s || "－"}　${staff.name}`;
-  }).join("");
+  }).join("\n");;
 
   const blocks = [
     { type: "header", text: { type: "plain_text", text: `📋 今日のおむすび（${todayDisp}）`, emoji: true } },
