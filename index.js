@@ -1659,3 +1659,14 @@ function testSimplePost() {
   });
   Logger.log(JSON.stringify(result));
 }
+
+function testGetTodaySchedule() {
+  const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
+  Logger.log("今日: " + todayStr);
+  
+  const names = ["仲村渠 長代", "岩崎 里沙", "川畑 麻衣子", "今村 俊貴"];
+  names.forEach(name => {
+    const result = getTodaySchedule(name, todayStr);
+    Logger.log(name + ": " + result.length + "件 " + JSON.stringify(result));
+  });
+}
