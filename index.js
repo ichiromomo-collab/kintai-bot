@@ -45,6 +45,61 @@ function sendButton() {
 }
 
 
+// ===== Slack API呼び出し共通関数 =====
+function callSlackApi(method, params) {
+  const url = "https://slack.com/api/" + method;
+  const res = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json; charset=utf-8",
+    headers: { Authorization: "Bearer " + SLACK_BOT_TOKEN },
+    payload: JSON.stringify(params),
+    muteHttpExceptions: true
+  });
+  const json = JSON.parse(res.getContentText());
+  if (!json.ok) {
+    Logger.log("⚠ Slack API エラー [" + method + "]: " + json.error);
+    Logger.log(JSON.stringify(json));
+  }
+  return json;
+}
+
+// ===== 時刻変換ユーティリティ =====
+function toMinutes(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    return val.getHours() * 60 + val.getMinutes();
+  }
+  const str = String(val).trim();
+  const m = str.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return parseInt(m[1]) * 60 + parseInt(m[2]);
+}
+
+function timeToMinutes(str) {
+  if (!str) return 0;
+  const m = String(str).match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return 0;
+  return parseInt(m[1]) * 60 + parseInt(m[2]);
+}
+
+function minutesToHHMM(min) {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h + ":" + String(m).padStart(2, "0");
+}
+
+function formatDate(date) {
+  return Utilities.formatDate(date, "Asia/Tokyo", "yyyy/MM/dd");
+}
+
+function convertScheduleDateToYMD(dateStr, year) {
+  // "3/11(火)" → "2026/03/11"
+  const m = dateStr.match(/(\d{1,2})\/(\d{1,2})/);
+  if (!m) return dateStr;
+  return year + "/" + String(m[1]).padStart(2, "0") + "/" + String(m[2]).padStart(2, "0");
+}
+
+
 // ===== SlackからのPOSTを受け取る =====
 function doPost(e) {
   Logger.log("🚀 doPost called! raw=%s", e ? e.postData?.contents : "no data");
