@@ -1257,15 +1257,15 @@ ${nowStr} 現在：*${personName}* が担当します` }
   // ステータス変更
   if (action.startsWith("status_")) {
     const actionValue = payload.actions?.[0]?.value || "";
-    Logger.log("actionValue=" + actionValue + " action=" + action);
     let staffName = "", status = "";
     try {
-      const parsed = JSON.parse(actionValue);
+      // +をスペースに戻してからJSONパース
+      const decoded = actionValue.replace(/\+/g, " ");
+      const parsed = JSON.parse(decoded);
       staffName = parsed.staffName || parsed.name || "";
       status = parsed.status || "";
     } catch(e) {
-      // valueが文字列の場合はstaffNameとして使う
-      staffName = actionValue;
+      staffName = actionValue.replace(/\+/g, " ");
       status = action.replace("status_", "");
     }
     updateOmusubiLog(todayStr, staffName, status);
