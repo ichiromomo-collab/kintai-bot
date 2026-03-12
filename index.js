@@ -1741,6 +1741,15 @@ function parseAndWriteSchedule(docId) {
     const tableRows = table.tableRows || [];
     Logger.log("tableRows数: " + tableRows.length);
     if (tableRows.length < 2) continue;
+    Logger.log("headerRow keys: " + Object.keys(tableRows[0]).join(","));
+    const headerRow = tableRows[0];
+    const headerCells = headerRow.tableCells || [];
+    Logger.log("headerCells数: " + headerCells.length);
+    if (headerCells.length > 0) {
+      Logger.log("cell[0] keys: " + Object.keys(headerCells[0]).join(","));
+      const cp = headerCells[0].content && headerCells[0].content[0] && headerCells[0].content[0].paragraph;
+      Logger.log("cell[0] text: " + JSON.stringify(cp && cp.elements && cp.elements[0] && cp.elements[0].textRun));
+    }
 
     // ヘッダー行から日付を取得
     const dates = (tableRows[0].tableCells || []).map(function(cell) {
