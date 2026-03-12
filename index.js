@@ -1288,16 +1288,19 @@ ${nowStr} 現在：*${personName}* が担当します` }
           }
         }]
       });
+      
     } else {
-      // 通常ステータス変更ログ
-      callSlackApi("chat.postMessage", {
-        channel: TODAY_CHANNEL,
-        text: `${status}　${staffName}`,
-        blocks: [{ type: "section",
-          text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
-        }]
-      });
-    }
+  // チャンネルに通知
+  callSlackApi("chat.postMessage", {
+    channel: TODAY_CHANNEL,
+    text: `${status}　${staffName}`,
+    blocks: [{ type: "section",
+      text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
+    }]
+  });
+  // DMに次のボタンを送る
+  sendNextStatusButton(staffName, status);
+}
   }
 }
 
@@ -1659,4 +1662,67 @@ function testSimplePost() {
     text: "テスト投稿"
   });
   Logger.log(JSON.stringify(result));
+}
+// ===== DMに次のステータスボタンを送る =====
+function sendNextStatusButton(staffName, currentStatus) {
+  // スタッフマスタからSlackユーザーIDを取得
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const staffSheet = ss.getSheetByName("スタッフマスタ");
+  if (!staffSheet) return;
+
+  const staffData = staffSheet.getDataRange().getValues();
+  staffData.shift();
+  let slackUserId = "";
+  staffData.forEach(([id, , , , name, userId]) => {
+    if (String(name).trim() === staffName) slackUserId = userId || "";
+  });
+  if (!slackUserId) return;
+
+  // スタッフの種別を取得
+  const staffConf = STAFF_CONFIG.find(s => s.name === staffName);
+  if (!staffConf) return;
+
+  // 次のボタンを種別ごとに定義
+  let buttons = [];
+  if (staffConf.type === "nurse") {
+    buttons = [
+      { text: "🏥 訪問開始", action_id: "status_visit_start" },
+      { text: "🚗 移動中",   action_id: "status_moving" },
+      { text: "✅ 空き",     action_id: "status_free" },
+    ];
+  } else if (staffConf.type === "office") {
+    buttons = [
+      { text: "🏢 事務所",   action_id: "status_office" },
+      { text: "🚗 外出中",   action_id: "status_out" },
+      { text: "✅ 空き",     action_id: "status_free" },
+    ];
+  } else {
+    buttons = [
+      { text: "📊 営業中",   action_id: "status_sales" },
+      { text: "🏢 事務所",   action_id: "status_office" },
+      { text: "🚗 外出中",   action_id: "status_out" },
+      { text: "✅ 空き",     action_id: "status_free" },
+    ];
+  }
+
+  callSlackApi("chat.postMessage", {
+    channel: slackUserId,
+    text: `現在：${currentStatus}　次のステータスを選んでください`,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn",
+          text: `現在：*${currentStatus}*\n次のステータスを選んでください` }
+      },
+      {
+        type: "actions",
+        elements: buttons.map(b => ({
+          type: "button",
+          text: { type: "plain_text", text: b.text, emoji: true },
+          action_id: b.action_id + "_" + staffName.replace(/\s/g, "_"),
+          value: JSON.stringify({ staffName, status: b.text })
+        }))
+      }
+    ]
+  });
 }
