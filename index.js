@@ -1313,6 +1313,14 @@ function getTodaySchedule(staffName, todayStr) {
       if (dateStr === todayStr) targetRows.push(i + 2); // 実際の行番号
     }
 
+    Logger.log("getTodaySchedule: staffName=" + staffName + " todayStr=" + todayStr + " targetRows=" + targetRows.length);
+    if (nameCol.length > 0) {
+      const sampleDate = dateCol[0][0];
+      const sampleFormatted = sampleDate instanceof Date
+        ? Utilities.formatDate(sampleDate, "Asia/Tokyo", "yyyy/MM/dd")
+        : String(sampleDate);
+      Logger.log("サンプル日付: " + JSON.stringify(sampleDate) + " → " + sampleFormatted);
+    }
     if (targetRows.length === 0) return [];
 
     const rows = [];
