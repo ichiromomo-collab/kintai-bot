@@ -1610,6 +1610,7 @@ function parseAndWriteSchedule(docId) {
         // セル内の訪問を改行で分割
         // 形式：「09:00～10:00 医 患者名」または「09:00～10:00 患者名」
         const lines = cellText.split(/\n/).map(l => l.trim()).filter(l => l);
+        if (lines.length > 0) Logger.log("仲村渠デバッグ staffName=" + staffName + " date=" + dateStr + " lines=" + JSON.stringify(lines));
         let i = 0;
         while (i < lines.length) {
           const timeMatch = lines[i].match(/(\d{1,2}:\d{2}).*?(\d{1,2}:\d{2})/);
@@ -1618,7 +1619,7 @@ function parseAndWriteSchedule(docId) {
             const end = timeMatch[2];
             let kind = "";
             let patient = "";
-            if (i + 1 < lines.length && /^(医|准|介|リ|精)/.test(lines[i+1])) {
+            if (i + 1 < lines.length && /^[（(]?予定|^(医|准|介|リ|精|業務)/.test(lines[i+1])) {
               kind = lines[i+1];
               patient = lines[i+2] || "";
               i += 3;
