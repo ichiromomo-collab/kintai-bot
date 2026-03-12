@@ -1713,8 +1713,8 @@ function importKaipokePDF() {
   // Docs APIでテーブルを取得
   parseAndWriteSchedule(docId);
   
-  // 変換ドキュメントを削除
-  DriveApp.getFileById(docId).setTrashed(true);
+  // 変換ドキュメントは確認のため残す
+  // DriveApp.getFileById(docId).setTrashed(true);
 }
 
 function parseAndWriteSchedule(docId) {
@@ -1732,6 +1732,9 @@ function parseAndWriteSchedule(docId) {
 
   const timePattern = /(\d{2}:\d{2})～(\d{2}:\d{2})（(予定|実績)・(医|介|業務)）/;
   const rows = [];
+
+  Logger.log("📄 bodyContent件数: " + (docData.body && docData.body.content ? docData.body.content.length : 0));
+  Logger.log("📄 要素タイプ: " + (docData.body && docData.body.content ? docData.body.content.map(e => Object.keys(e).join(",")).join(" | ") : "none"));
 
   const bodyContent = docData.body && docData.body.content ? docData.body.content : [];
   for (const elem of bodyContent) {
