@@ -102,6 +102,7 @@ function convertScheduleDateToYMD(dateStr, year) {
 
 // ===== SlackからのPOSTを受け取る =====
 function doPost(e) {
+  Logger.log("doPost受信: " + (e.postData ? e.postData.contents.substring(0, 200) : "なし"));
   Logger.log("🚀 doPost called! raw=%s", e ? e.postData?.contents : "no data");
 
   try {
@@ -1255,7 +1256,17 @@ ${nowStr} 現在：*${personName}* が担当します` }
 
   // ステータス変更
   if (action.startsWith("status_")) {
-    const { staffName, status } = JSON.parse(payload.actions?.[0]?.value || "{}");
+    const actionValue = payload.actions?.[0]?.value || "";
+    let staffName = "", status = "";
+    try {
+      const parsed = JSON.parse(actionValue);
+      staffName = parsed.staffName || parsed.name || "";
+      status = parsed.status || "";
+    } catch(e) {
+      // valueが文字列の場合はstaffNameとして使う
+      staffName = actionValue;
+      status = action.replace("status_", "");
+    }
     updateOmusubiLog(todayStr, staffName, status);
     updateOmusubiMessage(todayStr);
 
