@@ -1733,14 +1733,13 @@ function parseAndWriteSchedule(docId) {
   const timePattern = /(\d{2}:\d{2})～(\d{2}:\d{2})（(予定|実績)・(医|介|業務)）/;
   const rows = [];
 
-  Logger.log("📄 bodyContent件数: " + (docData.body && docData.body.content ? docData.body.content.length : 0));
-  Logger.log("📄 要素タイプ: " + (docData.body && docData.body.content ? docData.body.content.map(e => Object.keys(e).join(",")).join(" | ") : "none"));
-
   const bodyContent = docData.body && docData.body.content ? docData.body.content : [];
   for (const elem of bodyContent) {
     if (!elem.table) continue;
     const table = elem.table;
+    Logger.log("テーブル構造キー: " + Object.keys(table).join(","));
     const tableRows = table.tableRows || [];
+    Logger.log("tableRows数: " + tableRows.length);
     if (tableRows.length < 2) continue;
 
     // ヘッダー行から日付を取得
