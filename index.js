@@ -102,7 +102,7 @@ function convertScheduleDateToYMD(dateStr, year) {
 
 // ===== SlackからのPOSTを受け取る =====
 function doPost(e) {
-  Logger.log("doPost受信: " + (e.postData ? e.postData.contents.substring(0, 200) : "なし"));
+  console.log("doPost受信: " + (e.postData ? e.postData.contents.substring(0, 200) : "なし"));
   Logger.log("🚀 doPost called! raw=%s", e ? e.postData?.contents : "no data");
 
   try {
