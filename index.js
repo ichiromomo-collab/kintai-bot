@@ -1257,6 +1257,7 @@ ${nowStr} 現在：*${personName}* が担当します` }
   // ステータス変更
   if (action.startsWith("status_")) {
     const actionValue = payload.actions?.[0]?.value || "";
+    Logger.log("actionValue=" + actionValue + " action=" + action);
     let staffName = "", status = "";
     try {
       const parsed = JSON.parse(actionValue);
