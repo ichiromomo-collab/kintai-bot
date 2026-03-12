@@ -1288,12 +1288,73 @@ ${nowStr} 現在：*${personName}* が担当します` }
           }
         }]
       });
-        function testDM() {
-       sendNextStatusButton("米須 珠美", "🏥 訪問開始");
-       }
+ // ===== DMに次のステータスボタンを送る =====
+function sendNextStatusButton(staffName, currentStatus) {
+  Logger.log("🔍 sendNextStatusButton called: " + staffName + " / " + currentStatus);
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const staffSheet = ss.getSheetByName("スタッフマスタ");
+  if (!staffSheet) return;
 
-      
-    } else {
+  const staffData = staffSheet.getDataRange().getValues();
+  staffData.shift();
+  let slackUserId = "";
+  staffData.forEach(([id, , , , name, userId]) => {
+    if (String(name).trim() === staffName) slackUserId = userId || "";
+  });
+
+  if (!slackUserId) {
+    Logger.log("⚠ slackUserId が空です: " + staffName);
+    return;
+  }
+  Logger.log("✅ slackUserId: " + slackUserId);
+
+  const staffConf = STAFF_CONFIG.find(s => s.name === staffName);
+  if (!staffConf) return;
+
+  let buttons = [];
+  if (staffConf.type === "nurse") {
+    buttons = [
+      { text: "🏥 訪問開始", action_id: "status_visit_start" },
+      { text: "🚗 移動中",   action_id: "status_moving" },
+      { text: "✅ 空き",     action_id: "status_free" },
+    ];
+  } else if (staffConf.type === "office") {
+    buttons = [
+      { text: "🏢 事務所",   action_id: "status_office" },
+      { text: "🚗 外出中",   action_id: "status_out" },
+      { text: "✅ 空き",     action_id: "status_free" },
+    ];
+  } else {
+    buttons = [
+      { text: "📊 営業中",   action_id: "status_sales" },
+      { text: "🏢 事務所",   action_id: "status_office" },
+      { text: "🚗 外出中",   action_id: "status_out" },
+      { text: "✅ 空き",     action_id: "status_free" },
+    ];
+  }
+
+  callSlackApi("chat.postMessage", {
+    channel: slackUserId,
+    text: `現在：${currentStatus}　次のステータスを選んでください`,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn",
+          text: `現在：*${currentStatus}*\n次のステータスを選んでください` }
+      },
+      {
+        type: "actions",
+        elements: buttons.map(b => ({
+          type: "button",
+          text: { type: "plain_text", text: b.text, emoji: true },
+          action_id: b.action_id + "_" + staffName.replace(/\s/g, "_"),
+          value: JSON.stringify({ staffName, status: b.text })
+        }))
+      }
+    ]
+  });
+}
+       } else {
   // チャンネルに通知
   callSlackApi("chat.postMessage", {
     channel: TODAY_CHANNEL,
