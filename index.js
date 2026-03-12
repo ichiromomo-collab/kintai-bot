@@ -848,6 +848,147 @@ function handleAttendanceFixed(payload) {
 }
 
 
+// ===== 毎朝8時：勤怠確認ボタン送信 =====
+function dailyAttendanceCheck() {
+  const ss            = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const scheduleSheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
+  const staffSheet    = ss.getSheetByName("スタッフマスタ");
+
+  if (!scheduleSheet || !staffSheet) {
+    Logger.log("⚠ シートが見つかりません"); return;
+  }
+
+  // 土日はスキップ
+  const today = new Date();
+  const todayDow = today.getDay();
+  if (todayDow === 0 || todayDow === 6) {
+    Logger.log("土日のためスキップ"); return;
+  }
+
+  // 対象日：月曜日なら金曜日（3日前）、それ以外は昨日
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - (todayDow === 1 ? 3 : 1));
+  const yesterdayStr  = Utilities.formatDate(yesterday, "Asia/Tokyo", "yyyy/MM/dd");
+  const yesterdayDisp = Utilities.formatDate(yesterday, "Asia/Tokyo", "M/d");
+
+  // スタッフマスタ読み込み
+  const staffData = staffSheet.getDataRange().getValues();
+  staffData.shift();
+  const staffMap = new Map();
+  staffData.forEach(([id, , , , name, slackUserId]) => {
+    if (id) staffMap.set(String(name).trim(), { id: String(id).trim(), slackUserId: slackUserId || "" });
+  });
+
+  // スケジュール詳細シートから昨日勤務があったスタッフを取得
+  const scheduleData = scheduleSheet.getDataRange().getValues();
+  scheduleData.shift();
+  const workedStaff = new Set();
+  const excludeStaff = ["川畑 麻衣子", "岩崎 里沙"];
+
+  scheduleData.forEach(row => {
+    const staffName = String(row[0]).trim();
+    let dateStr;
+    if (row[1] instanceof Date) {
+      dateStr = Utilities.formatDate(row[1], "Asia/Tokyo", "yyyy/MM/dd");
+    } else {
+      dateStr = String(row[1]).trim();
+    }
+    if (dateStr === yesterdayStr && !excludeStaff.includes(staffName)) workedStaff.add(staffName);
+  });
+
+  if (workedStaff.size === 0) {
+    Logger.log("昨日の勤務者なし"); return;
+  }
+
+  // 対象スタッフごとにボタン送信
+  let sentCount = 0;
+  workedStaff.forEach(staffName => {
+    const staff = staffMap.get(staffName);
+    if (!staff) return;
+
+    const mentionText = staff.slackUserId ? `<@${staff.slackUserId}>` : staffName + " さん";
+
+    callSlackApi("chat.postMessage", {
+      channel: CHANNEL_ID,
+      text: `📋 ${mentionText} 昨日の勤怠確認`,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn",
+            text: `📋 ${mentionText}\n\n昨日（${yesterdayDisp}）の勤怠打刻はできていますか？`
+          }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "✅ できてます", emoji: true },
+              style: "primary",
+              action_id: "attendance_ok",
+              value: JSON.stringify({ staffName, staffId: staff.id, dateStr: yesterdayStr })
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "🔖 できてます（残業許可申請済み）", emoji: true },
+              action_id: "attendance_overtime_ok",
+              value: JSON.stringify({ staffName, staffId: staff.id, dateStr: yesterdayStr })
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "❌ できてません", emoji: true },
+              style: "danger",
+              action_id: "attendance_ng",
+              value: JSON.stringify({ staffName, staffId: staff.id, dateStr: yesterdayStr })
+            }
+          ]
+        }
+      ]
+    });
+    logAttendanceCheck(staffName, yesterdayStr, "送信済み");
+    sentCount++;
+  });
+
+  Logger.log(`✅ 勤怠確認ボタン送信完了: ${sentCount}名`);
+
+  // 未解決の「できてません」を再催促
+  const logSheet2 = ss.getSheetByName(ATTENDANCE_LOG_SHEET);
+  if (!logSheet2) return;
+  const logData = logSheet2.getDataRange().getValues();
+  logData.shift();
+  logData.forEach(row => {
+    if (row[2] !== "できてません") return;
+    const isFixed = logData.some(r => r[0] === row[0] && r[1] === row[1] && r[2] === "修正完了");
+    if (isFixed) return;
+    const managerIds = [MANAGER_ID_1, MANAGER_ID_2, MANAGER_ID_3].filter(Boolean);
+    managerIds.forEach(mid => {
+      callSlackApi("chat.postMessage", {
+        channel: mid,
+        text: `🔁 勤怠未修正の再催促`,
+        blocks: [
+          {
+            type: "section",
+            text: { type: "mrkdwn",
+              text: `🔁 *勤怠未修正の再催促*\n\n*スタッフ：* ${row[1]}\n*対象日：* ${row[0]}\n\nまだ修正が完了していません。対応をお願いします。マネーフォワードで申請後、修正完了ボタンを押してください。`
+            }
+          },
+          {
+            type: "actions",
+            elements: [{
+              type: "button",
+              text: { type: "plain_text", text: "✅ 修正完了", emoji: true },
+              style: "primary",
+              action_id: "attendance_fixed",
+              value: JSON.stringify({ staffName: row[1], dateStr: row[0] })
+            }]
+          }
+        ]
+      });
+    });
+  });
+}
+
+
 // ===== 昼12時：未回答者に再送 =====
 function noonAttendanceReminder() {
   const ss        = SpreadsheetApp.openById(SPREADSHEET_ID);
