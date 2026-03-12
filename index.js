@@ -173,16 +173,7 @@ function doPost(e) {
 
     // --- 今日のおむすび：緊急携帯・ステータス ---
     if (action.startsWith("oncall_") || action.startsWith("status_")) {
-      // 即座にレスポンスを返してタイムアウトを防ぐ
-      // キャッシュにpayloadを保存してトリガーで処理
-      const cache = CacheService.getScriptCache();
-      const cacheKey = "omusubi_payload_" + new Date().getTime();
-      cache.put(cacheKey, JSON.stringify(payload), 60);
-      // 非同期処理用トリガーを作成
-      ScriptApp.newTrigger("processOmusubiAsync")
-        .timeBased().after(1).create();
-      // キャッシュキーをスクリプトプロパティに保存
-      PropertiesService.getScriptProperties().setProperty("PENDING_OMUSUBI_KEY", cacheKey);
+      handleTodayStatus(payload);
       return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
     }
 
@@ -1297,35 +1288,43 @@ ${nowStr} 現在：*${personName}* が担当します` }
   }
 }
 
-// ===== 今日のスケジュール取得 =====
+// ===== 今日のスケジュール取得（高速版） =====
 function getTodaySchedule(staffName, todayStr) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
     if (!sheet) return [];
 
-    const data = sheet.getDataRange().getValues();
-    data.shift(); // ヘッダー除去
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return [];
+
+    // A列・B列だけ先に読んで対象行を特定
+    const nameCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    const dateCol = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+
+    const targetRows = [];
+    for (let i = 0; i < nameCol.length; i++) {
+      const name = String(nameCol[i][0]).trim();
+      if (name !== staffName) continue;
+      const d = dateCol[i][0];
+      const dateStr = d instanceof Date
+        ? Utilities.formatDate(d, "Asia/Tokyo", "yyyy/MM/dd")
+        : String(d).trim();
+      if (dateStr === todayStr) targetRows.push(i + 2); // 実際の行番号
+    }
+
+    if (targetRows.length === 0) return [];
 
     const rows = [];
-    data.forEach(row => {
-      const name = String(row[0]).trim();
-      let dateStr;
-      if (row[1] instanceof Date) {
-        dateStr = Utilities.formatDate(row[1], "Asia/Tokyo", "yyyy/MM/dd");
-      } else {
-        dateStr = String(row[1]).trim();
-      }
-      if (name !== staffName || dateStr !== todayStr) return;
-
-      const start   = row[2] instanceof Date ? Utilities.formatDate(row[2], "Asia/Tokyo", "HH:mm") : String(row[2]).trim();
-      const end     = row[3] instanceof Date ? Utilities.formatDate(row[3], "Asia/Tokyo", "HH:mm") : String(row[3]).trim();
-      const kind    = String(row[4]).trim();
-      const patient = String(row[5]).trim();
+    targetRows.forEach(rowNum => {
+      const r = sheet.getRange(rowNum, 1, 1, 6).getValues()[0];
+      const start   = r[2] instanceof Date ? Utilities.formatDate(r[2], "Asia/Tokyo", "HH:mm") : String(r[2]).trim();
+      const end     = r[3] instanceof Date ? Utilities.formatDate(r[3], "Asia/Tokyo", "HH:mm") : String(r[3]).trim();
+      const kind    = String(r[4]).trim();
+      const patient = String(r[5]).trim();
       rows.push({ start, end, kind, patient });
     });
 
-    // 開始時刻でソート
     rows.sort((a, b) => a.start.localeCompare(b.start));
     return rows;
   } catch(err) {
