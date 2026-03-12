@@ -1012,6 +1012,10 @@ function noonAttendanceReminder() {
   const logData = logSheet.getDataRange().getValues();
   logData.shift();
 
+  Logger.log("yesterdayStr: " + yesterdayStr);
+  Logger.log("ログ件数: " + logData.length);
+  if (logData.length > 0) Logger.log("ログ1行目A列: " + JSON.stringify(logData[0][0]));
+
   const sentStaff    = new Set();
   const answeredStaff = new Set();
 
@@ -1019,6 +1023,7 @@ function noonAttendanceReminder() {
     const dateStr = String(row[0]);
     const name    = String(row[1]);
     const answer  = String(row[2]);
+    Logger.log(`行: dateStr=${dateStr} name=${name} answer=${answer} match=${dateStr === yesterdayStr}`);
     if (dateStr !== yesterdayStr) return;
     if (answer === "送信済み") sentStaff.add(name);
     if (["できてます", "できてません", "できてます（残業許可申請済み）"].includes(answer)) {
