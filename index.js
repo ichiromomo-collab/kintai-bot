@@ -1242,13 +1242,11 @@ function handleTodayStatus(payload) {
     const personName = payload.actions?.[0]?.value || "";
     updateOmusubiLog(todayStr, "oncall", personName);
     updateOmusubiMessage(todayStr);
-    // ログとして流す
     callSlackApi("chat.postMessage", {
       channel: TODAY_CHANNEL,
       text: `📱 緊急携帯当番：${personName}`,
       blocks: [{ type: "section",
-        text: { type: "mrkdwn", text: `📱 *緊急携帯当番*
-${nowStr} 現在：*${personName}* が担当します` }
+        text: { type: "mrkdwn", text: `📱 *緊急携帯当番*\n${nowStr} 現在：*${personName}* が担当します` }
       }]
     });
     return;
@@ -1259,7 +1257,6 @@ ${nowStr} 現在：*${personName}* が担当します` }
     const actionValue = payload.actions?.[0]?.value || "";
     let staffName = "", status = "";
     try {
-      // +をスペースに戻してからJSONパース
       const decoded = actionValue.replace(/\+/g, " ");
       const parsed = JSON.parse(decoded);
       staffName = parsed.staffName || parsed.name || "";
@@ -1271,8 +1268,8 @@ ${nowStr} 現在：*${personName}* が担当します` }
     updateOmusubiLog(todayStr, staffName, status);
     updateOmusubiMessage(todayStr);
 
-    // 訪問開始の場合はスケジュール一覧も投稿
     if (action.startsWith("status_visit_start")) {
+      // 訪問開始：チャンネルにスケジュール付きで投稿
       const scheduleLines = getTodaySchedule(staffName, todayStr);
       const scheduleText = scheduleLines.length > 0
         ? scheduleLines.map(r => `　• ${r.start}〜${r.end}　${r.patient}${r.kind ? "（"+r.kind+"）" : ""}`).join("\n")
@@ -1288,89 +1285,25 @@ ${nowStr} 現在：*${personName}* が担当します` }
           }
         }]
       });
- // ===== DMに次のステータスボタンを送る =====
-function sendNextStatusButton(staffName, currentStatus) {
-  Logger.log("🔍 sendNextStatusButton called: " + staffName + " / " + currentStatus);
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const staffSheet = ss.getSheetByName("スタッフマスタ");
-  if (!staffSheet) return;
+      // DMに次のボタンを送る
+      sendNextStatusButton(staffName, "🏥 訪問開始");
 
-  const staffData = staffSheet.getDataRange().getValues();
-  staffData.shift();
-  let slackUserId = "";
-  staffData.forEach(([id, , , , name, userId]) => {
-    if (String(name).trim() === staffName) slackUserId = userId || "";
-  });
-
-  if (!slackUserId) {
-    Logger.log("⚠ slackUserId が空です: " + staffName);
-    return;
-  }
-  Logger.log("✅ slackUserId: " + slackUserId);
-
-  const staffConf = STAFF_CONFIG.find(s => s.name === staffName);
-  if (!staffConf) return;
-
-  let buttons = [];
-  if (staffConf.type === "nurse") {
-    buttons = [
-      { text: "🏥 訪問開始", action_id: "status_visit_start" },
-      { text: "🚗 移動中",   action_id: "status_moving" },
-      { text: "✅ 空き",     action_id: "status_free" },
-    ];
-  } else if (staffConf.type === "office") {
-    buttons = [
-      { text: "🏢 事務所",   action_id: "status_office" },
-      { text: "🚗 外出中",   action_id: "status_out" },
-      { text: "✅ 空き",     action_id: "status_free" },
-    ];
-  } else {
-    buttons = [
-      { text: "📊 営業中",   action_id: "status_sales" },
-      { text: "🏢 事務所",   action_id: "status_office" },
-      { text: "🚗 外出中",   action_id: "status_out" },
-      { text: "✅ 空き",     action_id: "status_free" },
-    ];
-  }
-
-  callSlackApi("chat.postMessage", {
-    channel: slackUserId,
-    text: `現在：${currentStatus}　次のステータスを選んでください`,
-    blocks: [
-      {
-        type: "section",
-        text: { type: "mrkdwn",
-          text: `現在：*${currentStatus}*\n次のステータスを選んでください` }
-      },
-      {
-        type: "actions",
-        elements: buttons.map(b => ({
-          type: "button",
-          text: { type: "plain_text", text: b.text, emoji: true },
-          action_id: b.action_id + "_" + staffName.replace(/\s/g, "_"),
-          value: JSON.stringify({ staffName, status: b.text })
-        }))
-      }
-    ]
-  });
-}
-       } else {
-  // チャンネルに通知
-  callSlackApi("chat.postMessage", {
-    channel: TODAY_CHANNEL,
-    text: `${status}　${staffName}`,
-    blocks: [{ type: "section",
-      text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
-    }]
-  });
-  // DMに次のボタンを送る
-  sendNextStatusButton(staffName, status);
-}
+    } else {
+      // その他ステータス：チャンネルに通知
+      callSlackApi("chat.postMessage", {
+        channel: TODAY_CHANNEL,
+        text: `${status}　${staffName}`,
+        blocks: [{ type: "section",
+          text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
+        }]
+      });
+      // DMに次のボタンを送る
+      sendNextStatusButton(staffName, status);
+    }
   }
 }
-
 // ===== 今日のスケジュール取得（高速版） =====
-function getTodaySchedule(staffName, todayStr) {
+ function getTodaySchedule(staffName, todayStr) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
