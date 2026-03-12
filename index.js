@@ -1093,9 +1093,17 @@ function dailyAttendanceCheck() {
   const workedStaff = new Set();
 
   const excludeStaff = ["川畑 麻衣子", "岩崎 里沙"];
+  Logger.log("yesterdayStr: " + yesterdayStr);
+  if (scheduleData.length > 0) Logger.log("シート日付サンプル: " + JSON.stringify(scheduleData[0][1]) + " / type: " + typeof scheduleData[0][1]);
   scheduleData.forEach(row => {
     const staffName = String(row[0]).trim();
-    const dateStr   = String(row[1]).trim(); // スケジュール詳細は既に yyyy/MM/dd 形式
+    // 日付型・文字列両対応
+    let dateStr;
+    if (row[1] instanceof Date) {
+      dateStr = Utilities.formatDate(row[1], "Asia/Tokyo", "yyyy/MM/dd");
+    } else {
+      dateStr = String(row[1]).trim();
+    }
     if (dateStr === yesterdayStr && !excludeStaff.includes(staffName)) workedStaff.add(staffName);
   });
 
