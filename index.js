@@ -1288,7 +1288,9 @@ ${nowStr} 現在：*${personName}* が担当します` }
           }
         }]
       });
-        sendNextStatusButton(staffName, "🏥 訪問開始");
+        function testDM() {
+       sendNextStatusButton("米須 珠美", "🏥 訪問開始");
+       }
 
       
     } else {
