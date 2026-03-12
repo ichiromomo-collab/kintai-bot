@@ -1059,7 +1059,7 @@ function applyStripeFormatting(sheet) {
 // ===== 毎朝8時：昨日の勤怠確認ボタン送信 =====
 function dailyAttendanceCheck() {
   const ss          = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const scheduleSheet = ss.getSheetByName(SCHEDULE_SHEET_OT);
+  const scheduleSheet = ss.getSheetByName(SCHEDULE_DETAIL_SHEET);
   const staffSheet    = ss.getSheetByName("スタッフマスタ");
 
   if (!scheduleSheet || !staffSheet) {
@@ -1092,10 +1092,11 @@ function dailyAttendanceCheck() {
   scheduleData.shift();
   const workedStaff = new Set();
 
+  const excludeStaff = ["川畑 麻衣子", "岩崎 里沙"];
   scheduleData.forEach(row => {
     const staffName = String(row[0]).trim();
-    const dateStr   = convertScheduleDateToYMD(String(row[1]).trim(), yesterday.getFullYear());
-    if (dateStr === yesterdayStr) workedStaff.add(staffName);
+    const dateStr   = String(row[1]).trim(); // スケジュール詳細は既に yyyy/MM/dd 形式
+    if (dateStr === yesterdayStr && !excludeStaff.includes(staffName)) workedStaff.add(staffName);
   });
 
   if (workedStaff.size === 0) {
