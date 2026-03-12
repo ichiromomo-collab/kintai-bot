@@ -164,6 +164,7 @@ ${dateStr} の勤怠打刻確認済み（残業許可申請済み）` }}]
 ${dateStr} の勤怠打刻を確認しました。` }
         }]
       });
+      logAttendanceCheck(staffName, dateStr, "できてます");
       return ContentService.createTextOutput("")
         .setMimeType(ContentService.MimeType.TEXT);
     }
