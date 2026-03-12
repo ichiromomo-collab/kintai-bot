@@ -1589,7 +1589,7 @@ function parseAndWriteSchedule(docId) {
     for (let r = 1; r < tableRows.length; r++) {
       const cells = tableRows[r].tableCells || [];
       if (cells.length < 2) continue;
-      const staffName = getCellText(cells[0]).replace(/\s+/g, "");
+      const staffName = getCellText(cells[0]).trim();
       if (!staffName) continue;
 
       // 日付ヘッダー取得（2行目のヘッダー行から）
