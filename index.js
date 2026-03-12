@@ -1112,6 +1112,7 @@ function dailyAttendanceCheck() {
   }
 
   // 対象スタッフごとにボタン送信
+  let sentCount = 0;
   workedStaff.forEach(staffName => {
     const staff = staffMap.get(staffName);
     if (!staff) return;
@@ -1154,9 +1155,10 @@ function dailyAttendanceCheck() {
       ]
     });
     logAttendanceCheck(staffName, yesterdayStr, "送信済み");
+    sentCount++;
   });
 
-  Logger.log(`✅ 勤怠確認ボタン送信完了: ${workedStaff.size}名`);
+  Logger.log(`✅ 勤怠確認ボタン送信完了: ${sentCount}名`);
 
   // 未解決の「できてません」を再催促
   const ss2 = SpreadsheetApp.openById(SPREADSHEET_ID);
