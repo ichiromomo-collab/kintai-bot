@@ -174,15 +174,9 @@ function doPost(e) {
 
     // --- 今日のおむすび：緊急携帯・ステータス ---
    if (action.startsWith("oncall_") || action.startsWith("status_")) {
-   const cacheKey = "omusubi_" + new Date().getTime();
-   CacheService.getScriptCache().put(cacheKey, JSON.stringify(payload), 60);
-   PropertiesService.getScriptProperties().setProperty("PENDING_OMUSUBI_KEY", cacheKey);
-   ScriptApp.newTrigger("processOmusubiAsync")
-    .timeBased()
-    .after(1000)
-    .create();
+  handleTodayStatus(payload);
   return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
-   }
+}
 
     // --- 勤怠確認：できてます（残業許可申請済み）---
     if (action === "attendance_overtime_ok") {
