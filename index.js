@@ -1286,6 +1286,7 @@ function handleTodayStatus(payload) {
         }]
       });
       // DMに次のボタンを送る
+      Logger.log("🔥 sendNextStatusButton呼び出し直前: " + staffName);
       sendNextStatusButton(staffName, "🏥 訪問開始");
 
     } else {
