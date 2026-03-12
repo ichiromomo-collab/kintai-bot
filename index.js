@@ -1288,6 +1288,8 @@ ${nowStr} 現在：*${personName}* が担当します` }
           }
         }]
       });
+        sendNextStatusButton(staffName, "🏥 訪問開始");
+
       
     } else {
   // チャンネルに通知
