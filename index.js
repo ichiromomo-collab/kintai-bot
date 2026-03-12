@@ -1234,6 +1234,7 @@ function handleTodayStatus(payload) {
   const action  = payload.actions?.[0]?.action_id || "";
   const nowStr  = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
   const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
+  Logger.log("🔍 action_id=" + action + " value=" + JSON.stringify(payload.actions?.[0]?.value));
 
   // 緊急携帯
   if (action.startsWith("oncall_")) {
