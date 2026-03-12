@@ -118,7 +118,16 @@ function doPost(e) {
 
     // --- 今日のおむすび：緊急携帯・ステータス ---
     if (action.startsWith("oncall_") || action.startsWith("status_")) {
-      handleTodayStatus(payload);
+      // 即座にレスポンスを返してタイムアウトを防ぐ
+      // キャッシュにpayloadを保存してトリガーで処理
+      const cache = CacheService.getScriptCache();
+      const cacheKey = "omusubi_payload_" + new Date().getTime();
+      cache.put(cacheKey, JSON.stringify(payload), 60);
+      // 非同期処理用トリガーを作成
+      ScriptApp.newTrigger("processOmusubiAsync")
+        .timeBased().after(1).create();
+      // キャッシュキーをスクリプトプロパティに保存
+      PropertiesService.getScriptProperties().setProperty("PENDING_OMUSUBI_KEY", cacheKey);
       return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
     }
 
@@ -1126,6 +1135,37 @@ function getTodaySchedule(staffName, todayStr) {
     return [];
   }
 }
+
+// ===== 非同期おむすびステータス処理 =====
+function processOmusubiAsync() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const cacheKey = props.getProperty("PENDING_OMUSUBI_KEY");
+    if (!cacheKey) return;
+
+    const cache = CacheService.getScriptCache();
+    const payloadStr = cache.get(cacheKey);
+    if (!payloadStr) return;
+
+    const payload = JSON.parse(payloadStr);
+    handleTodayStatus(payload);
+
+    // クリーンアップ
+    cache.remove(cacheKey);
+    props.deleteProperty("PENDING_OMUSUBI_KEY");
+
+    // このトリガー自身を削除
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(t => {
+      if (t.getHandlerFunction() === "processOmusubiAsync") {
+        ScriptApp.deleteTrigger(t);
+      }
+    });
+  } catch(err) {
+    Logger.log("💥 processOmusubiAsync ERROR: " + err);
+  }
+}
+
 
 // ===== おむすびログ初期化 =====
 function initOmusubiLog(todayStr, ts) {
