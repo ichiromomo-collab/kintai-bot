@@ -1727,3 +1727,6 @@ Logger.log("🔍 sendNextStatusButton開始: " + staffName + " / " + currentStat
     ]
   });
 }
+function testDM() {
+  sendNextStatusButton("米須 珠美", "🏥 訪問開始");
+}
