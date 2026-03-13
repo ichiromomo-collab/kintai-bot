@@ -1664,9 +1664,8 @@ function testSimplePost() {
 }
 // ===== DMに次のステータスボタンを送る =====
 function sendNextStatusButton(staffName, currentStatus) {
-Logger.log("🔍 sendNextStatusButton開始: " + staffName + " / " + currentStatus);
-
-  // スタッフマスタからSlackユーザーIDを取得
+  Logger.log("🔍 sendNextStatusButton開始: " + staffName + " / " + currentStatus);
+  
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const staffSheet = ss.getSheetByName("スタッフマスタ");
   if (!staffSheet) return;
@@ -1677,33 +1676,58 @@ Logger.log("🔍 sendNextStatusButton開始: " + staffName + " / " + currentStat
   staffData.forEach(([id, , , , name, userId]) => {
     if (String(name).trim() === staffName) slackUserId = userId || "";
   });
-  if (!slackUserId) return;
+  if (!slackUserId) {
+    Logger.log("❌ slackUserIdが空: " + staffName);
+    return;
+  }
 
-  // スタッフの種別を取得
   const staffConf = STAFF_CONFIG.find(s => s.name === staffName);
   if (!staffConf) return;
 
-  // 次のボタンを種別ごとに定義
-  let buttons = [];
+  const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
+  const scheduleLines = getTodaySchedule(staffName, todayStr);
+
+  const elements = [];
+
+  // 看護師の場合は患者名ボタンを追加
+  if (staffConf.type === "nurse" && scheduleLines.length > 0) {
+    scheduleLines.forEach(r => {
+      elements.push({
+        type: "button",
+        text: { type: "plain_text", text: `🏥 ${r.patient}`, emoji: true },
+        action_id: "status_visit_start_" + staffName.replace(/\s/g, "_"),
+        value: JSON.stringify({ staffName, status: "🏥 訪問開始", patient: r.patient })
+      });
+    });
+  }
+
+  // 共通ボタン
   if (staffConf.type === "nurse") {
-    buttons = [
-      { text: "🏥 訪問開始", action_id: "status_visit_start" },
-      { text: "🚗 移動中",   action_id: "status_moving" },
-      { text: "✅ 空き",     action_id: "status_free" },
-    ];
+    elements.push({
+      type: "button",
+      text: { type: "plain_text", text: "🚗 移動中", emoji: true },
+      action_id: "status_moving_" + staffName.replace(/\s/g, "_"),
+      value: JSON.stringify({ staffName, status: "🚗 移動中" })
+    });
+    elements.push({
+      type: "button",
+      text: { type: "plain_text", text: "✅ 空き", emoji: true },
+      action_id: "status_free_" + staffName.replace(/\s/g, "_"),
+      value: JSON.stringify({ staffName, status: "✅ 空き" })
+    });
   } else if (staffConf.type === "office") {
-    buttons = [
-      { text: "🏢 事務所",   action_id: "status_office" },
-      { text: "🚗 外出中",   action_id: "status_out" },
-      { text: "✅ 空き",     action_id: "status_free" },
-    ];
-  } else {
-    buttons = [
-      { text: "📊 営業中",   action_id: "status_sales" },
-      { text: "🏢 事務所",   action_id: "status_office" },
-      { text: "🚗 外出中",   action_id: "status_out" },
-      { text: "✅ 空き",     action_id: "status_free" },
-    ];
+    elements.push({ type: "button", text: { type: "plain_text", text: "🏢 事務所", emoji: true }, action_id: "status_office_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "🏢 事務所" }) });
+    elements.push({ type: "button", text: { type: "plain_text", text: "🚗 外出中", emoji: true }, action_id: "status_out_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "🚗 外出中" }) });
+    elements.push({ type: "button", text: { type: "plain_text", text: "✅ 空き", emoji: true }, action_id: "status_free_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "✅ 空き" }) });
+  }
+
+  // Slackのactionsブロックは最大5ボタンまでなので分割
+  const blockElements = [];
+  for (let i = 0; i < elements.length; i += 5) {
+    blockElements.push({
+      type: "actions",
+      elements: elements.slice(i, i + 5)
+    });
   }
 
   callSlackApi("chat.postMessage", {
@@ -1712,18 +1736,9 @@ Logger.log("🔍 sendNextStatusButton開始: " + staffName + " / " + currentStat
     blocks: [
       {
         type: "section",
-        text: { type: "mrkdwn",
-          text: `現在：*${currentStatus}*\n次のステータスを選んでください` }
+        text: { type: "mrkdwn", text: `現在：*${currentStatus}*\n次のステータスを選んでください` }
       },
-      {
-        type: "actions",
-        elements: buttons.map(b => ({
-          type: "button",
-          text: { type: "plain_text", text: b.text, emoji: true },
-          action_id: b.action_id + "_" + staffName.replace(/\s/g, "_"),
-          value: JSON.stringify({ staffName, status: b.text })
-        }))
-      }
+      ...blockElements
     ]
   });
 }
