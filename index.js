@@ -1183,6 +1183,7 @@ function postTodayOmusubi() {
     if (staff.type === "nurse") {
       buttons = [
         { text: "🏥 訪問開始", action_id: "status_visit_start", value: staff.name },
+        { text: "🏢 事務所",   action_id: "status_office",      value: staff.name },
         { text: "🚗 移動中",   action_id: "status_moving",      value: staff.name },
         { text: "✅ 空き",     action_id: "status_free",        value: staff.name },
       ];
@@ -1498,6 +1499,7 @@ ${staffLines}`
     if (staff.type === "nurse") {
       buttons = [
         { text: "🏥 訪問開始", action_id: "status_visit_start" },
+        { text: "🏢 事務所",   action_id: "status_office" },
         { text: "🚗 移動中",   action_id: "status_moving" },
         { text: "✅ 空き",     action_id: "status_free" },
       ];
