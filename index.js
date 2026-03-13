@@ -1789,12 +1789,12 @@ function postStatusMessage() {
         ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
         : String(data[i][0]).trim();
       if (rowDate === todayStr) {
-        sheet.getRange(i + 1, 2).setValue(ts);
+        sheet.getRange(i + 1, 2).setValue("'" + ts);
         updated = true;
         break;
       }
     }
-    if (!updated) sheet.appendRow([todayStr, ts]);
+    if (!updated) sheet.appendRow([todayStr,"'" +  ts]);
     Logger.log("✅ スタッフ状況メッセージ投稿: ts=" + ts);
   }
 }
