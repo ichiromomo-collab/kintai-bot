@@ -1711,6 +1711,20 @@ function sendNextStatusButton(staffName, currentStatus) {
 
   // 共通ボタン
   if (staffConf.type === "nurse") {
+    scheduleLines.forEach((r, i) => {
+      elements.push({
+        type: "button",
+        text: { type: "plain_text", text: `🏥 ${r.patient}`, emoji: true },
+        action_id: "status_visit_start_" + staffName.replace(/\s/g, "_") + "_" + i,
+        value: JSON.stringify({ staffName, status: "🏥 訪問開始", patient: r.patient })
+      });
+    });
+    elements.push({
+      type: "button",
+      text: { type: "plain_text", text: "🏢 事務所", emoji: true },
+      action_id: "status_office_" + staffName.replace(/\s/g, "_"),
+      value: JSON.stringify({ staffName, status: "🏢 事務所" })
+    });
     elements.push({
       type: "button",
       text: { type: "plain_text", text: "🚗 移動中", emoji: true },
@@ -1723,7 +1737,8 @@ function sendNextStatusButton(staffName, currentStatus) {
       action_id: "status_free_" + staffName.replace(/\s/g, "_"),
       value: JSON.stringify({ staffName, status: "✅ 空き" })
     });
-  } else if (staffConf.type === "office") {
+     } 
+     else if (staffConf.type === "office") {
     elements.push({ type: "button", text: { type: "plain_text", text: "🏢 事務所", emoji: true }, action_id: "status_office_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "🏢 事務所" }) });
     elements.push({ type: "button", text: { type: "plain_text", text: "🚗 外出中", emoji: true }, action_id: "status_out_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "🚗 外出中" }) });
     elements.push({ type: "button", text: { type: "plain_text", text: "✅ 空き", emoji: true }, action_id: "status_free_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "✅ 空き" }) });
