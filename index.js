@@ -1800,7 +1800,7 @@ function updateStatusMessage(todayStr) {
     ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
     : String(data[i][0]).trim();
   if (rowDate === todayStr) {
-    ts = String(Math.floor(Number(data[i][1]))); // 小数を整数に
+    ts = String(data[i][1]);
     break;
   }
 }
