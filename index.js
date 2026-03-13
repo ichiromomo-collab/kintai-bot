@@ -1838,3 +1838,7 @@ function updateStatusMessage(todayStr) {
   });
   Logger.log("✅ スタッフ状況更新: " + nowStr);
 }
+function testUpdateStatus() {
+  const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
+  updateStatusMessage(todayStr);
+}
