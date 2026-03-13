@@ -1840,5 +1840,12 @@ function updateStatusMessage(todayStr) {
 }
 function testUpdateStatus() {
   const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
+  Logger.log("todayStr: " + todayStr);
+  
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const statusLogSheet = ss.getSheetByName(STATUS_LOG_SHEET);
+  const data = statusLogSheet.getDataRange().getValues();
+  Logger.log("シートデータ: " + JSON.stringify(data));
+  
   updateStatusMessage(todayStr);
 }
