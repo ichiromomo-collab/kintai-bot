@@ -1664,6 +1664,8 @@ function testSimplePost() {
 }
 // ===== DMに次のステータスボタンを送る =====
 function sendNextStatusButton(staffName, currentStatus) {
+Logger.log("🔍 sendNextStatusButton開始: " + staffName + " / " + currentStatus);
+
   // スタッフマスタからSlackユーザーIDを取得
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const staffSheet = ss.getSheetByName("スタッフマスタ");
