@@ -1775,26 +1775,8 @@ function postStatusMessage() {
   if (result?.ok) {
     const ts = result.message?.ts || result.ts || "";
     Logger.log("✅ 投稿されたts: " + ts); // ← これで確認
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(STATUS_LOG_SHEET);
-    if (!sheet) {
-      sheet = ss.insertSheet(STATUS_LOG_SHEET);
-      sheet.appendRow(["日付", "ts"]);
-    }
-    // 今日の行があれば更新、なければ追加
-    const data = sheet.getDataRange().getValues();
-    let updated = false;
-    for (let i = 1; i < data.length; i++) {
-      const rowDate = data[i][0] instanceof Date
-        ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
-        : String(data[i][0]).trim();
-      if (rowDate === todayStr) {
-        sheet.getRange(i + 1, 2).setNumberValue(Number(ts));
-        updated = true;
-        break;
-      }
-    }
-    if (!updated) sheet.appendRow([todayStr, ts]);
+
+   PropertiesService.getScriptProperties().setProperty("STATUS_TS_" + todayStr, ts);
     Logger.log("✅ スタッフ状況メッセージ投稿: ts=" + ts);
   }
 }
@@ -1806,18 +1788,8 @@ function updateStatusMessage(todayStr) {
   if (!statusLogSheet) return;
 
   // 今日のtsを取得
-  const data = statusLogSheet.getDataRange().getValues();
-  let ts = "";
-  for (let i = data.length - 1; i >= 1; i--) {
-  const rowDate = data[i][0] instanceof Date
-    ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
-    : String(data[i][0]).trim();
-  if (rowDate === todayStr) {
-    ts = String(Number(data[i][1]));
-    break;
-  }
-}
-  if (!ts) return;
+ const ts = PropertiesService.getScriptProperties().getProperty("STATUS_TS_" + todayStr);
+if (!ts) return;
 
   // おむすびログからステータス取得
   const omusubiSheet = ss.getSheetByName(OMUSUBI_LOG_SHEET);
