@@ -1295,7 +1295,7 @@ function handleTodayStatus(payload) {
       });
       // DMに次のボタンを送る
       Logger.log("🔥 sendNextStatusButton呼び出し直前: " + staffName);
-      sendNextStatusButton(staffName, "🏥 訪問開始");
+      sendNextStatusButton(staffName,  `🏥 訪問開始（${currentPatient}さん）`);
 
     } else {
       // その他ステータス：チャンネルに通知
