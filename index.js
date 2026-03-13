@@ -1279,32 +1279,41 @@ function handleTodayStatus(payload) {
     if (action.startsWith("status_visit_start")) {
       // 訪問開始：チャンネルにスケジュール付きで投稿
       const scheduleLines = getTodaySchedule(staffName, todayStr);
-      const scheduleText = scheduleLines.length > 0
-        ? scheduleLines.map(r => `　• ${r.start}〜${r.end}　${r.patient}${r.kind ? "（"+r.kind+"）" : ""}`).join("\n")
-        : "　（スケジュールなし）";
-       let currentPatient = patient; // DMボタンから渡ってきた患者名を優先
-       if (!currentPatient && scheduleLines.length > 0) {
-       const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-       const found = scheduleLines.find(r => {
-       const [sh, sm] = r.start.split(":").map(Number);
-       return (sh * 60 + sm) >= nowMin - 30;
-       });
-        currentPatient = (found || scheduleLines[0]).patient;
-       }
-      callSlackApi("chat.postMessage", {
-        channel: TODAY_CHANNEL,
-        text: `🏥 訪問開始：${staffName}`,
-        blocks: [{ type: "section",
-          text: { type: "mrkdwn",
-            text: `🏥 *${staffName}* 訪問開始${currentPatient ? "：" + currentPatient + "さん" : ""}\n（${nowStr} 更新）\n\n*本日のスケジュール：*\n${scheduleText}`
-          }
-        }]
-      });
+     // 押した回数を取得
+      const countKey = "VISIT_COUNT_" + staffName + "_" + todayStr;
+      const props = PropertiesService.getScriptProperties();
+      const visitCount = parseInt(props.getProperty(countKey) || "0");
+      props.setProperty(countKey, String(visitCount + 1));
+
+      const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+      const nextVisit = scheduleLines.find(r => {
+      const [sh, sm] = r.start.split(":").map(Number);
+      return (sh * 60 + sm) >= nowMin - 30;
+      }) || scheduleLines[0];
+
+    let scheduleText;
+    if (visitCount === 0) {
+     // 初回：全件表示
+    scheduleText = scheduleLines.length > 0
+    ? scheduleLines.map(r => `□ ${r.start}〜${r.end} ${r.patient}${r.kind ? "（" + r.kind + "）" : ""}`).join("\n")
+    : "□（スケジュールなし）";
+    } else {
+   // 2回目以降：次の1件だけ
+   scheduleText = nextVisit
+    ? `➡️ 次：${nextVisit.start}〜${nextVisit.end} *${nextVisit.patient}*${nextVisit.kind ? "（" + nextVisit.kind + "）" : ""}`
+    : "□（スケジュールなし）";
+}
+
+let currentPatient = patient;
+if (!currentPatient && scheduleLines.length > 0) {
+  currentPatient = nextVisit?.patient || scheduleLines[0].patient;
+}
+        }
+      
       // DMに次のボタンを送る
       Logger.log("🔥 sendNextStatusButton呼び出し直前: " + staffName);
       sendNextStatusButton(staffName,  `🏥 訪問開始（${currentPatient}さん）`);
-
-    } else {
+} else {
       // その他ステータス：チャンネルに通知
       callSlackApi("chat.postMessage", {
         channel: TODAY_CHANNEL,
@@ -1317,7 +1326,7 @@ function handleTodayStatus(payload) {
       sendNextStatusButton(staffName, status);
     }
   }
-}
+
 // ===== 今日のスケジュール取得（高速版） =====
  function getTodaySchedule(staffName, todayStr) {
   try {
