@@ -1428,7 +1428,10 @@ function updateOmusubiLog(todayStr, key, value) {
   if (colIndex < 0) return;
 
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === todayStr) {
+    const rowDate = data[i][0] instanceof Date
+      ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
+      : String(data[i][0]).trim();
+    if (rowDate === todayStr) {
       sheet.getRange(i + 1, colIndex + 1).setValue(value);
       return;
     }
@@ -1446,7 +1449,10 @@ function updateOmusubiMessage(todayStr) {
   let ts = "", oncall = "未定", statusMap = {};
 
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === todayStr) {
+    const rowDate = data[i][0] instanceof Date
+  ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
+  : String(data[i][0]).trim();
+   if (rowDate === todayStr) {
       ts = String(data[i][1]);
       oncall = String(data[i][2]) || "未定";
       STAFF_CONFIG.forEach(staff => {
