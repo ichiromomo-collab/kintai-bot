@@ -1275,6 +1275,7 @@ function handleTodayStatus(payload) {
     updateOmusubiMessage(todayStr);
     updateStatusMessage(todayStr);
 
+
     if (action.startsWith("status_visit_start")) {
       // 訪問開始：チャンネルにスケジュール付きで投稿
       const scheduleLines = getTodaySchedule(staffName, todayStr);
@@ -1459,6 +1460,9 @@ function updateOmusubiMessage(todayStr) {
         const col = headers.indexOf(staff.name);
         if (col >= 0) statusMap[staff.name] = String(data[i][col]) || "";
       });
+
+      Logger.log("statusMap: " + JSON.stringify(statusMap)); // ← 追加
+
       break;
     }
   }
