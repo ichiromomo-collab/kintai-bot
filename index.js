@@ -1796,11 +1796,14 @@ function updateStatusMessage(todayStr) {
   const data = statusLogSheet.getDataRange().getValues();
   let ts = "";
   for (let i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][0]) === todayStr) {
-      ts = String(data[i][1]);
-      break;
-    }
+  const rowDate = data[i][0] instanceof Date
+    ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
+    : String(data[i][0]).trim();
+  if (rowDate === todayStr) {
+    ts = String(Math.floor(Number(data[i][1]))); // 小数を整数に
+    break;
   }
+}
   if (!ts) return;
 
   // おむすびログからステータス取得
