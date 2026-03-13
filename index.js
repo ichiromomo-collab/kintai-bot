@@ -1754,14 +1754,14 @@ function sendNextStatusButton(staffName, currentStatus) {
     });
      // 岩崎さんだけ追加
     if (staffName === "岩崎 里沙") {
-    buttons.push(
+    elements.push(
     { type: "button", text: { type: "plain_text", text: "📞 電話対応中" }, action_id: "status_phone_" + staffName, value: JSON.stringify({ staffName, status: "📞 電話対応中" }) },
     { type: "button", text: { type: "plain_text", text: "🚨 イレギュラー発生中" }, action_id: "status_irregular_" + staffName, value: JSON.stringify({ staffName, status: "🚨 イレギュラー発生中" }) }
      );
    }
 
    // 全スタッフに帰宅
-   buttons.push(
+   elements.push(
   { type: "button", text: { type: "plain_text", text: "🏠 帰宅" }, action_id: "status_home_" + staffName, value: JSON.stringify({ staffName, status: "🏠 帰宅" }) }
    );
 
