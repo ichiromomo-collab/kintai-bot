@@ -1131,12 +1131,12 @@ const OMUSUBI_LOG_SHEET = "今日のおむすびログ";
 
 // スタッフ定義
 const STAFF_CONFIG = [
-  { name: "川畑 麻衣子", type: "" },
+  //{ name: "川畑 麻衣子", type: "nurse" },
   { name: "岩崎 里沙",   type: "nurse" },
-  { name: "仲村渠 長代", type: "" },
-  { name: "今村 俊貴",   type: "" },//nurse//
-  { name: "知念 美穂",   type: "" },//office//
-  { name: "米須 珠美",   type: "" },//sales//
+ // { name: "仲村渠 長代", type: "nurse" },
+ // { name: "今村 俊貴",   type: "nurse" },//nurse//
+//{ name: "知念 美穂",   type: "office" },//office//
+  //{ name: "米須 珠美",   type: "sales" },//sales//
 ];
 
 // ===== 毎朝：今日のおむすび投稿 =====
