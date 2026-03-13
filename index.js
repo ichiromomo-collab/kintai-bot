@@ -11,6 +11,9 @@ const SCHEDULE_SHEET_OT = "スケジュール";
 const MANAGER_ID_1      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_1");
 const MANAGER_ID_2      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_2");
 const MANAGER_ID_3      = PropertiesService.getScriptProperties().getProperty("MANAGER_SLACK_ID_3");
+const STATUS_CHANNEL = "C0AL9NQ83PY"; // #現在のスタッフ状況
+const STATUS_LOG_SHEET = "スタッフ状況ログ";
+
 
 
 // ===== Slackにボタン送信（テスト用） =====
@@ -1133,7 +1136,7 @@ const STAFF_CONFIG = [
   { name: "仲村渠 長代", type: "nurse" },
   { name: "今村 俊貴",   type: "nurse" },
   { name: "知念 美穂",   type: "office" },
-  { name: "米須 珠美",   type: "nurse" },//sales//
+  { name: "米須 珠美",   type: "sales" },//sales//
 ];
 
 // ===== 毎朝：今日のおむすび投稿 =====
@@ -1225,6 +1228,7 @@ function postTodayOmusubi() {
   if (result?.ok) {
     const ts = result.message?.ts || result.ts || "";
     initOmusubiLog(todayStr, ts);
+    postStatusMessage(); // ← 追加
   }
 
   Logger.log("✅ 今日のおむすび投稿完了");
@@ -1269,6 +1273,7 @@ function handleTodayStatus(payload) {
     }
     updateOmusubiLog(todayStr, staffName, status);
     updateOmusubiMessage(todayStr);
+    updateStatusMessage(todayStr);
 
     if (action.startsWith("status_visit_start")) {
       // 訪問開始：チャンネルにスケジュール付きで投稿
@@ -1769,4 +1774,78 @@ function sendNextStatusButton(staffName, currentStatus) {
 }
 function testDM() {
   sendNextStatusButton("米須 珠美", "🏥 訪問開始");
+}
+// ===== スタッフ状況チャンネルの初期メッセージ投稿 =====
+function postStatusMessage() {
+  const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
+  const result = callSlackApi("chat.postMessage", {
+    channel: STATUS_CHANNEL,
+    text: "📋 スタッフ状況",
+    blocks: [{ type: "section", text: { type: "mrkdwn", text: "📋 *スタッフ状況*\n（まだ更新されていません）" }}]
+  });
+  if (result?.ok) {
+    const ts = result.message?.ts || result.ts || "";
+    // tsをスプレッドシートに保存
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet = ss.getSheetByName(STATUS_LOG_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(STATUS_LOG_SHEET);
+      sheet.appendRow(["日付", "ts"]);
+    }
+    sheet.appendRow([todayStr, ts]);
+    Logger.log("✅ スタッフ状況メッセージ投稿: ts=" + ts);
+  }
+}
+
+// ===== スタッフ状況チャンネルを更新 =====
+function updateStatusMessage(todayStr) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const statusLogSheet = ss.getSheetByName(STATUS_LOG_SHEET);
+  if (!statusLogSheet) return;
+
+  // 今日のtsを取得
+  const data = statusLogSheet.getDataRange().getValues();
+  let ts = "";
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]) === todayStr) {
+      ts = String(data[i][1]);
+      break;
+    }
+  }
+  if (!ts) return;
+
+  // おむすびログからステータス取得
+  const omusubiSheet = ss.getSheetByName(OMUSUBI_LOG_SHEET);
+  if (!omusubiSheet) return;
+  const omusubiData = omusubiSheet.getDataRange().getValues();
+  const headers = omusubiData[0];
+  let statusMap = {};
+  for (let i = 1; i < omusubiData.length; i++) {
+    if (String(omusubiData[i][0]) === todayStr) {
+      STAFF_CONFIG.forEach(staff => {
+        const col = headers.indexOf(staff.name);
+        if (col >= 0) statusMap[staff.name] = String(omusubiData[i][col]) || "";
+      });
+      break;
+    }
+  }
+
+  const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
+  const staffLines = STAFF_CONFIG.map(staff => {
+    const s = statusMap[staff.name] || "－";
+    return `${s || "－"}　*${staff.name}*`;
+  }).join("\n");
+
+  callSlackApi("chat.update", {
+    channel: STATUS_CHANNEL,
+    ts,
+    text: "📋 スタッフ状況",
+    blocks: [{
+      type: "section",
+      text: { type: "mrkdwn",
+        text: `📋 *現在のスタッフ状況*（${nowStr} 更新）\n\n${staffLines}`
+      }
+    }]
+  });
+  Logger.log("✅ スタッフ状況更新: " + nowStr);
 }
