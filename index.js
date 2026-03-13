@@ -1704,17 +1704,6 @@ function sendNextStatusButton(staffName, currentStatus) {
 
   const elements = [];
 
-  // 看護師の場合は患者名ボタンを追加
-  if (staffConf.type === "nurse" && scheduleLines.length > 0) {
-  scheduleLines.forEach((r, i) => {
-    elements.push({
-      type: "button",
-      text: { type: "plain_text", text: `🏥 ${r.patient}`, emoji: true },
-      action_id: "status_visit_start_" + staffName.replace(/\s/g, "_") + "_" + i,
-      value: JSON.stringify({ staffName, status: "🏥 訪問開始", patient: r.patient })
-    });
-  });
-  }
 
   // 共通ボタン
   if (staffConf.type === "nurse") {
