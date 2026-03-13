@@ -1774,14 +1774,27 @@ function postStatusMessage() {
   });
   if (result?.ok) {
     const ts = result.message?.ts || result.ts || "";
-    // tsをスプレッドシートに保存
+    Logger.log("✅ 投稿されたts: " + ts); // ← これで確認
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sheet = ss.getSheetByName(STATUS_LOG_SHEET);
     if (!sheet) {
       sheet = ss.insertSheet(STATUS_LOG_SHEET);
       sheet.appendRow(["日付", "ts"]);
     }
-    sheet.appendRow([todayStr, ts]);
+    // 今日の行があれば更新、なければ追加
+    const data = sheet.getDataRange().getValues();
+    let updated = false;
+    for (let i = 1; i < data.length; i++) {
+      const rowDate = data[i][0] instanceof Date
+        ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy/MM/dd")
+        : String(data[i][0]).trim();
+      if (rowDate === todayStr) {
+        sheet.getRange(i + 1, 2).setValue(ts);
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) sheet.appendRow([todayStr, ts]);
     Logger.log("✅ スタッフ状況メッセージ投稿: ts=" + ts);
   }
 }
