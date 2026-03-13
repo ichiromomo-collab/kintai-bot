@@ -1255,12 +1255,13 @@ function handleTodayStatus(payload) {
   // ステータス変更
   if (action.startsWith("status_")) {
     const actionValue = payload.actions?.[0]?.value || "";
-    let staffName = "", status = "";
+    let staffName = "", status = "", patient = "";
     try {
       const decoded = actionValue.replace(/\+/g, " ");
       const parsed = JSON.parse(decoded);
       staffName = parsed.staffName || parsed.name || "";
       status = parsed.status || "";
+      patient = parsed.patient || "";
     } catch(e) {
       staffName = actionValue.replace(/\+/g, " ");
       status = action.replace("status_", "");
@@ -1274,8 +1275,15 @@ function handleTodayStatus(payload) {
       const scheduleText = scheduleLines.length > 0
         ? scheduleLines.map(r => `　• ${r.start}〜${r.end}　${r.patient}${r.kind ? "（"+r.kind+"）" : ""}`).join("\n")
         : "　（スケジュールなし）";
-      const currentPatient = scheduleLines.length > 0 ? scheduleLines[0].patient : "";
-
+       let currentPatient = patient; // DMボタンから渡ってきた患者名を優先
+       if (!currentPatient && scheduleLines.length > 0) {
+       const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+       const found = scheduleLines.find(r => {
+       const [sh, sm] = r.start.split(":").map(Number);
+       return (sh * 60 + sm) >= nowMin - 30;
+       });
+        currentPatient = (found || scheduleLines[0]).patient;
+       }
       callSlackApi("chat.postMessage", {
         channel: TODAY_CHANNEL,
         text: `🏥 訪問開始：${staffName}`,
