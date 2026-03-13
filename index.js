@@ -1837,3 +1837,14 @@ function testUpdateStatus() {
   
   updateStatusMessage(todayStr);
 }
+function testInitLog() {
+  const todayStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd");
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(OMUSUBI_LOG_SHEET);
+  if (sheet) ss.deleteSheet(sheet);
+  sheet = ss.insertSheet(OMUSUBI_LOG_SHEET);
+  sheet.appendRow(["日付", "メッセージts", "oncall", ...STAFF_CONFIG.map(s => s.name)]);
+  sheet.setFrozenRows(1);
+  sheet.appendRow([todayStr, "", "未定", ...STAFF_CONFIG.map(() => "")]);
+  Logger.log("✅ 初期化完了");
+}
