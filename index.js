@@ -1691,7 +1691,7 @@ function sendNextStatusButton(staffName, currentStatus) {
 
   // 看護師の場合は患者名ボタンを追加
   if (staffConf.type === "nurse" && scheduleLines.length > 0) {
-    scheduleLines.forEach(r => {
+    scheduleLines.forEach((r, i) => {
       elements.push({
         type: "button",
         text: { type: "plain_text", text: `🏥 ${r.patient}`, emoji: true },
