@@ -1136,7 +1136,7 @@ const STAFF_CONFIG = [
   { name: "仲村渠 長代", type: "nurse" },
   { name: "今村 俊貴",   type: "nurse" },
   { name: "知念 美穂",   type: "office" },
-  { name: "米須 珠美",   type: "sales" },//sales//
+  { name: "米須 珠美",   type: "nurse" },//sales//
 ];
 
 // ===== 毎朝：今日のおむすび投稿 =====
