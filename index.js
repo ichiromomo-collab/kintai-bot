@@ -1752,21 +1752,37 @@ function sendNextStatusButton(staffName, currentStatus) {
       action_id: "status_free_" + staffName.replace(/\s/g, "_"),
       value: JSON.stringify({ staffName, status: "✅ 空き" })
     });
+     // 岩崎さんだけ追加
+    if (staffName === "岩崎 里沙") {
+    buttons.push(
+    { type: "button", text: { type: "plain_text", text: "📞 電話対応中" }, action_id: "status_phone_" + staffName, value: JSON.stringify({ staffName, status: "📞 電話対応中" }) },
+    { type: "button", text: { type: "plain_text", text: "🚨 イレギュラー発生中" }, action_id: "status_irregular_" + staffName, value: JSON.stringify({ staffName, status: "🚨 イレギュラー発生中" }) }
+     );
+   }
+
+   // 全スタッフに帰宅
+   buttons.push(
+  { type: "button", text: { type: "plain_text", text: "🏠 帰宅" }, action_id: "status_home_" + staffName, value: JSON.stringify({ staffName, status: "🏠 帰宅" }) }
+   );
+
      } 
      else if (staffConf.type === "office") {
     elements.push({ type: "button", text: { type: "plain_text", text: "🏢 事務所", emoji: true }, action_id: "status_office_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "🏢 事務所" }) });
     elements.push({ type: "button", text: { type: "plain_text", text: "🚗 外出中", emoji: true }, action_id: "status_out_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "🚗 外出中" }) });
     elements.push({ type: "button", text: { type: "plain_text", text: "✅ 空き", emoji: true }, action_id: "status_free_" + staffName.replace(/\s/g, "_"), value: JSON.stringify({ staffName, status: "✅ 空き" }) });
-  }
+   }
+   // 事務・営業の末尾に追加
+   elements.push(
+   { type: "button", text: { type: "plain_text", text: "🏠 帰宅" }, action_id: "status_home_" + staffName, value: JSON.stringify({ staffName, status: "🏠 帰宅" }) });
 
-  // Slackのactionsブロックは最大5ボタンまでなので分割
-  const blockElements = [];
-  for (let i = 0; i < elements.length; i += 5) {
+   // Slackのactionsブロックは最大5ボタンまでなので分割
+   const blockElements = [];
+   for (let i = 0; i < elements.length; i += 5) {
     blockElements.push({
       type: "actions",
       elements: elements.slice(i, i + 5)
     });
-  }
+   }
 
   callSlackApi("chat.postMessage", {
     channel: slackUserId,
