@@ -1808,11 +1808,13 @@ if (!ts) return;
   const headers = omusubiData[0];
   let statusMap = {};
   for (let i = 1; i < omusubiData.length; i++) {
+    const omusubiDate = omusubiData[i][0] instanceof Date
     if (String(omusubiData[i][0]) === todayStr) {
       STAFF_CONFIG.forEach(staff => {
         const col = headers.indexOf(staff.name);
         if (col >= 0) statusMap[staff.name] = String(omusubiData[i][col]) || "";
       });
+      Logger.log("statusMap: " + JSON.stringify(statusMap));
       break;
     }
   }
