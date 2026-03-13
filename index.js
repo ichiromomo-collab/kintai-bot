@@ -1752,6 +1752,7 @@ function sendNextStatusButton(staffName, currentStatus) {
       action_id: "status_free_" + staffName.replace(/\s/g, "_"),
       value: JSON.stringify({ staffName, status: "✅ 空き" })
     });
+    console.log("staffName確認:", JSON.stringify(staffName));
      // 岩崎さんだけ追加
     if (staffName === "岩崎 里沙") {
     elements.push(
