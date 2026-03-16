@@ -1157,7 +1157,16 @@ function postTodayOmusubi() {
   ];
 
   STAFF_CONFIG.forEach(staff => {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス` } });
+      // スケジュール取得して表示
+     const scheduleLines = getTodaySchedule(staff.name, todayStr);
+     const scheduleText = scheduleLines.length > 0
+     ? scheduleLines.map(r => `□ ${r.start}〜${r.end}　${r.patient}${r.kind ? "（" + r.kind + "）" : ""}`).join("\n")
+     : "（スケジュールなし）";
+
+     blocks.push({
+     type: "section",
+     text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス\n\n${scheduleText}` }
+     });
 
     let buttons = [];
     if (staff.type === "nurse") {
@@ -1261,73 +1270,30 @@ function handleTodayStatus(payload) {
     updateStatusMessage(todayStr);
 
 
-    if (action.startsWith("status_visit_start")) {
-      // 訪問開始：チャンネルにスケジュール付きで投稿
-      let currentPatient = patient; 
-    if (!currentPatient && scheduleLines.length > 0) {
-    currentPatient = nextVisit?.patient || scheduleLines[0].patient;
-   }
-     statusValue = currentPatient ? `🏥 訪問中（${currentPatient}さん）` :  "🏥 訪問開始"; // letなし！
-    updateOmusubiLog(todayStr, staffName, statusValue);
-    updateOmusubiMessage(todayStr);
-    updateStatusMessage(todayStr);
-    } else {
-     updateOmusubiLog(todayStr, staffName, statusValue); 
-     
-      const scheduleLines = getTodaySchedule(staffName, todayStr);
-     // 押した回数を取得
-      const countKey = "VISIT_COUNT_" + staffName + "_" + todayStr;
-      const props = PropertiesService.getScriptProperties();
-      const visitCount = parseInt(props.getProperty(countKey) || "0");
-      props.setProperty(countKey, String(visitCount + 1));
+if (action.startsWith("status_visit_start")) {
+  const scheduleLines = getTodaySchedule(staffName, todayStr);
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const nextVisit = scheduleLines.find(r => {
+    const [sh, sm] = r.start.split(":").map(Number);
+    return (sh * 60 + sm) >= nowMin - 30;
+  }) || scheduleLines[0];
 
-      const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-      const nextVisit = scheduleLines.find(r => {
-      const [sh, sm] = r.start.split(":").map(Number);
-      return (sh * 60 + sm) >= nowMin - 30;
-      }) || scheduleLines[0];
+  const visitText = nextVisit
+    ? `${nextVisit.start}〜${nextVisit.end}　*${nextVisit.patient}*${nextVisit.kind ? "（" + nextVisit.kind + "）" : ""}`
+    : "（スケジュールなし）";
 
-    let scheduleText;
-    if (visitCount === 0) {
-     // 初回：全件表示
-    scheduleText = scheduleLines.length > 0
-    ? scheduleLines.map(r => `□ ${r.start}〜${r.end} ${r.patient}${r.kind ? "（" + r.kind + "）" : ""}`).join("\n")
-    : "□（スケジュールなし）";
-    } else {
-   // 2回目以降：次の1件だけ
-   scheduleText = nextVisit
-    ? `➡️ 次：${nextVisit.start}〜${nextVisit.end} *${nextVisit.patient}*${nextVisit.kind ? "（" + nextVisit.kind + "）" : ""}`
-    : "□（スケジュールなし）";
-    }
-
-   let currentPatient = patient;
-   if (!currentPatient && scheduleLines.length > 0) {
-   currentPatient = nextVisit?.patient || scheduleLines[0].patient;
-   }
-
-    // ログに患者名付きで保存
-   updateOmusubiLog(todayStr, staffName, statusValue);
-   updateOmusubiMessage(todayStr);
-   updateStatusMessage(todayStr);
-        }
-      
-      // DMに次のボタンを送る
-      Logger.log("🔥 sendNextStatusButton呼び出し直前: " + staffName);
-      sendNextStatusButton(staffName, statusValue);
-
-      } else {
-      // その他ステータス：チャンネルに通知
-      callSlackApi("chat.postMessage", {
-        channel: TODAY_CHANNEL,
-        text: `${status}　${staffName}`,
-        blocks: [{ type: "section",
-          text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
-        }]
-      });
+  callSlackApi("chat.postMessage", {
+    channel: TODAY_CHANNEL,
+    text: `🏥 訪問開始　${staffName}`,
+    blocks: [{ type: "section",
+      text: { type: "mrkdwn", text: `🏥 *訪問開始*　${staffName}\n➡️ ${visitText}\n（${nowStr} 更新）` }
+    }]
+  });
       // DMに次のボタンを送る
       sendNextStatusButton(staffName, status);
     }
   }
+}
 
 // ===== 今日のスケジュール取得（高速版） =====
  function getTodaySchedule(staffName, todayStr) {
