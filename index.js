@@ -1271,27 +1271,45 @@ function handleTodayStatus(payload) {
 
 
 if (action.startsWith("status_visit_start")) {
-  const scheduleLines = getTodaySchedule(staffName, todayStr);
-  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-  const nextVisit = scheduleLines.find(r => {
-    const [sh, sm] = r.start.split(":").map(Number);
-    return (sh * 60 + sm) >= nowMin - 30;
-  }) || scheduleLines[0];
+    const scheduleLines = getTodaySchedule(staffName, todayStr);
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    const nextVisit = scheduleLines.find(r => {
+      const [sh, sm] = r.start.split(":").map(Number);
+      return (sh * 60 + sm) >= nowMin - 30;
+    }) || scheduleLines[0];
 
-  const visitText = nextVisit
-    ? `${nextVisit.start}〜${nextVisit.end}　*${nextVisit.patient}*${nextVisit.kind ? "（" + nextVisit.kind + "）" : ""}`
-    : "（スケジュールなし）";
+    let currentPatient = patient;
+    if (!currentPatient && nextVisit) currentPatient = nextVisit.patient;
+    statusValue = currentPatient ? `🏥 訪問中（${currentPatient}さん）` : "🏥 訪問開始";
+    updateOmusubiLog(todayStr, staffName, statusValue);
+    updateOmusubiMessage(todayStr);
+    updateStatusMessage(todayStr);
 
-  callSlackApi("chat.postMessage", {
-    channel: TODAY_CHANNEL,
-    text: `🏥 訪問開始　${staffName}`,
-    blocks: [{ type: "section",
-      text: { type: "mrkdwn", text: `🏥 *訪問開始*　${staffName}\n➡️ ${visitText}\n（${nowStr} 更新）` }
-    }]
-  });
-      // DMに次のボタンを送る
-      sendNextStatusButton(staffName, status);
-    }
+    const visitText = nextVisit
+      ? `${nextVisit.start}〜${nextVisit.end}　*${nextVisit.patient}*${nextVisit.kind ? "（" + nextVisit.kind + "）" : ""}`
+      : "（スケジュールなし）";
+
+    callSlackApi("chat.postMessage", {
+      channel: TODAY_CHANNEL,
+      text: `🏥 訪問開始　${staffName}`,
+      blocks: [{ type: "section",
+        text: { type: "mrkdwn", text: `🏥 *訪問開始*　${staffName}\n➡️ ${visitText}\n（${nowStr} 更新）` }
+      }]
+    });
+    sendNextStatusButton(staffName, statusValue);
+
+  } else {
+    // 訪問開始以外
+    updateOmusubiLog(todayStr, staffName, statusValue);
+    callSlackApi("chat.postMessage", {
+      channel: TODAY_CHANNEL,
+      text: `${status}　${staffName}`,
+      blocks: [{ type: "section",
+        text: { type: "mrkdwn", text: `${status}　*${staffName}*\n（${nowStr} 更新）` }
+      }]
+    });
+    sendNextStatusButton(staffName, statusValue);
+  }
   }
 }
 
