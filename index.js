@@ -1632,6 +1632,10 @@ function parseAndWriteSchedule(docId) {
   const res = UrlFetchApp.fetch(url, { headers: { Authorization: "Bearer " + token } });
   const docData = JSON.parse(res.getContentText());
 
+function testParseSchedule() {
+  parseAndWriteSchedule("1MEPQRBCdgi9iZRN18f4pohU52CcZcUSaeBZx9FOxDA0");
+}
+
   // セルテキスト取得ヘルパー
   function getCellText(cell) {
     if (!cell || !cell.content) return "";
