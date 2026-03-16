@@ -1243,7 +1243,7 @@ function handleTodayStatus(payload) {
 
   // 緊急携帯
   if (action.startsWith("oncall_")) {
-    const personName = payload.actions?.[0]?.value || "";
+    const personName = (payload.actions?.[0]?.value || "").replace(/\+/g, " ");
     updateOmusubiLog(todayStr, "oncall", personName);
     updateOmusubiMessage(todayStr);
     callSlackApi("chat.postMessage", {
