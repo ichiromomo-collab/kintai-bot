@@ -1224,6 +1224,7 @@ function postTodayOmusubi() {
     text: `📋 今日のおむすび（${todayDisp}）`,
     blocks
   });
+}
 
   if (result?.ok) {
     const ts = result.message?.ts || result.ts || "";
@@ -1232,8 +1233,6 @@ function postTodayOmusubi() {
   }
 
   Logger.log("✅ 今日のおむすび投稿完了");
-}
-
 
 // ===== ステータス・緊急携帯ボタン処理 =====
 function handleTodayStatus(payload) {
@@ -1271,13 +1270,29 @@ function handleTodayStatus(payload) {
       staffName = actionValue.replace(/\+/g, " ");
       status = action.replace("status_", "");
     }
-    updateOmusubiLog(todayStr, staffName, status);
+    
+    let statusValue = status;
+    if (status.includes("訪問") && patient) {
+    statusValue = `🏥 訪問中（${patient}さん）`;
+    }
+
     updateOmusubiMessage(todayStr);
     updateStatusMessage(todayStr);
 
 
     if (action.startsWith("status_visit_start")) {
       // 訪問開始：チャンネルにスケジュール付きで投稿
+      let currentPatient = patient; 
+    if (!currentPatient && scheduleLines.length > 0) {
+    currentPatient = nextVisit?.patient || scheduleLines[0].patient;
+   }
+     statusValue = currentPatient ? `🏥 訪問中（${currentPatient}さん）` :  "🏥 訪問開始"; // letなし！
+    updateOmusubiLog(todayStr, staffName, statusValue);
+    updateOmusubiMessage(todayStr);
+    updateStatusMessage(todayStr);
+    } else {
+     updateOmusubiLog(todayStr, staffName, statusValue); 
+     
       const scheduleLines = getTodaySchedule(staffName, todayStr);
      // 押した回数を取得
       const countKey = "VISIT_COUNT_" + staffName + "_" + todayStr;
@@ -1302,18 +1317,24 @@ function handleTodayStatus(payload) {
    scheduleText = nextVisit
     ? `➡️ 次：${nextVisit.start}〜${nextVisit.end} *${nextVisit.patient}*${nextVisit.kind ? "（" + nextVisit.kind + "）" : ""}`
     : "□（スケジュールなし）";
-}
+    }
 
-let currentPatient = patient;
-if (!currentPatient && scheduleLines.length > 0) {
-  currentPatient = nextVisit?.patient || scheduleLines[0].patient;
-}
+   let currentPatient = patient;
+   if (!currentPatient && scheduleLines.length > 0) {
+   currentPatient = nextVisit?.patient || scheduleLines[0].patient;
+   }
+
+    // ログに患者名付きで保存
+   updateOmusubiLog(todayStr, staffName, statusValue);
+   updateOmusubiMessage(todayStr);
+   updateStatusMessage(todayStr);
         }
       
       // DMに次のボタンを送る
       Logger.log("🔥 sendNextStatusButton呼び出し直前: " + staffName);
-      sendNextStatusButton(staffName,  `🏥 訪問開始（${currentPatient}さん）`);
-} else {
+      sendNextStatusButton(staffName, statusValue);
+
+      } else {
       // その他ステータス：チャンネルに通知
       callSlackApi("chat.postMessage", {
         channel: TODAY_CHANNEL,
@@ -1482,21 +1503,10 @@ function updateOmusubiMessage(todayStr) {
   const nowStr    = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
 
   // スタッフ一覧テキスト生成（訪問開始の場合は患者名も表示）
-  const staffLines = STAFF_CONFIG.map(staff => {
-    const s = statusMap[staff.name] || "－";
-    if (s && s.includes("訪問")) {
-      const todaySchedule = getTodaySchedule(staff.name, todayStr);
-      const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-      const current = todaySchedule.find(r => {
-        const [sh, sm] = r.start.split(":").map(Number);
-        const [eh, em] = r.end.split(":").map(Number);
-        return (sh * 60 + sm) <= nowMin && nowMin <= (eh * 60 + em);
-      }) || todaySchedule[0];
-      const patientInfo = current ? `（${current.patient}さん）` : "";
-      return `🏥 訪問中${patientInfo}　${staff.name}`;
-    }
-    return `${s || "－"}　${staff.name}`;
-  }).join("\n");;
+   const staffLines = STAFF_CONFIG.map(staff => {
+   const s = statusMap[staff.name] || "－";
+   return `${s || "－"}　*${staff.name}*`;
+   }).join("\n");
 
   const blocks = [
     { type: "header", text: { type: "plain_text", text: `📋 今日のおむすび（${todayDisp}）`, emoji: true } },
@@ -1517,38 +1527,58 @@ ${staffLines}`
   ];
 
   // ステータスボタン
-  STAFF_CONFIG.forEach(staff => {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス` }});
-    let buttons = [];
-    if (staff.type === "nurse") {
-      buttons = [
-        { text: "🏥 訪問開始", action_id: "status_visit_start" },
-        { text: "🏢 事務所",   action_id: "status_office" },
-        { text: "🚗 移動中",   action_id: "status_moving" },
-        { text: "✅ 空き",     action_id: "status_free" },
-      ];
-    } else if (staff.type === "office") {
-      buttons = [
-        { text: "🏢 事務所",   action_id: "status_office" },
-        { text: "🚗 外出中",   action_id: "status_out" },
-        { text: "✅ 空き",     action_id: "status_free" },
-      ];
-    } else {
-      buttons = [
-        { text: "📊 営業中",   action_id: "status_sales" },
-        { text: "🏢 事務所",   action_id: "status_office" },
-        { text: "🚗 外出中",   action_id: "status_out" },
-        { text: "✅ 空き",     action_id: "status_free" },
-      ];
-    }
-    blocks.push({ type: "actions", elements: buttons.map(b => ({
-      type: "button",
-      text: { type: "plain_text", text: b.text, emoji: true },
-      action_id: b.action_id + "_" + staff.name.replace(/\s/g, "_"),
-      value: JSON.stringify({ staffName: staff.name, status: b.text })
-    }))});
-    blocks.push({ type: "divider" });
+STAFF_CONFIG.forEach(staff => {
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス` }
   });
+
+  let buttons = [];
+  if (staff.type === "nurse") {
+    buttons = [
+      { text: "🏥 訪問開始", action_id: "status_visit_start", value: staff.name },
+      { text: "🏢 事務所",   action_id: "status_office",      value: staff.name },
+      { text: "🚗 移動中",   action_id: "status_moving",      value: staff.name },
+      { text: "✅ 空き",     action_id: "status_free",        value: staff.name },
+    ];
+    if (staff.name === "岩崎 里沙") {
+      buttons.push(
+        { text: "📞 電話対応中",        action_id: "status_phone",     value: staff.name },
+        { text: "🚨 イレギュラー発生中", action_id: "status_irregular", value: staff.name }
+      );
+    }
+  } else if (staff.type === "office") {
+    buttons = [
+      { text: "🏢 事務所", action_id: "status_office", value: staff.name },
+      { text: "🚗 外出中", action_id: "status_out",    value: staff.name },
+      { text: "✅ 空き",   action_id: "status_free",   value: staff.name },
+    ];
+  } else if (staff.type === "sales") {
+    buttons = [
+      { text: "📊 営業中", action_id: "status_sales",  value: staff.name },
+      { text: "🏢 事務所", action_id: "status_office", value: staff.name },
+      { text: "🚗 外出中", action_id: "status_out",    value: staff.name },
+      { text: "✅ 空き",   action_id: "status_free",   value: staff.name },
+    ];
+  }
+
+  // 5個ずつブロックに分割
+  const buttonElements = buttons.map(b => ({
+    type: "button",
+    text: { type: "plain_text", text: b.text, emoji: true },
+    action_id: b.action_id + "_" + staff.name.replace(/\s/g, "_"),
+    value: JSON.stringify({ staffName: staff.name, status: b.text })
+  }));
+  for (let i = 0; i < buttonElements.length; i += 5) {
+    blocks.push({
+      type: "actions",
+      elements: buttonElements.slice(i, i + 5)
+    });
+  }
+
+  blocks.push({ type: "divider" });
+});
+   }
 
   callSlackApi("chat.update", {
     channel: TODAY_CHANNEL,
@@ -1556,7 +1586,7 @@ ${staffLines}`
     text: `📋 今日のおむすび（${todayDisp}）`,
     blocks
   });
-}
+
 
 
 // ===== カイポケPDF→スケジュール詳細シート変換 =====
