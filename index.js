@@ -1862,20 +1862,21 @@ if (!ts) return;
   if (!omusubiSheet) return;
   const omusubiData = omusubiSheet.getDataRange().getValues();
   const headers = omusubiData[0];
-  let statusMap = {};
-  for (let i = 1; i < omusubiData.length; i++) {
-    const omusubiDate = omusubiData[i][0] instanceof Date
-  ? Utilities.formatDate(omusubiData[i][0], "Asia/Tokyo", "yyyy/MM/dd")
-  : String(omusubiData[i][0]).trim();
-if (omusubiDate === todayStr) {
-      STAFF_CONFIG.forEach(staff => {
-        const col = headers.indexOf(staff.name);
-        if (col >= 0) statusMap[staff.name] = String(omusubiData[i][col]) || "";
-      });
-      Logger.log("statusMap: " + JSON.stringify(statusMap));
-      break;
+   let statusMap = {};
+   let oncall = "未定";
+   for (let i = 1; i < omusubiData.length; i++) {
+   const omusubiDate = omusubiData[i][0] instanceof Date
+    ? Utilities.formatDate(omusubiData[i][0], "Asia/Tokyo", "yyyy/MM/dd")
+    : String(omusubiData[i][0]).trim();
+   if (omusubiDate === todayStr) {
+    oncall = String(omusubiData[i][2]) || "未定";  // ← oncall列を取得
+    STAFF_CONFIG.forEach(staff => {
+      const col = headers.indexOf(staff.name);
+      if (col >= 0) statusMap[staff.name] = String(omusubiData[i][col]) || "";
+    });
+    break;
     }
-  }
+   }
 
   const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
   const staffLines = STAFF_CONFIG.map(staff => {
@@ -1890,10 +1891,10 @@ if (omusubiDate === todayStr) {
     blocks: [{
       type: "section",
       text: { type: "mrkdwn",
-        text: `📋 *現在のスタッフ状況*（${nowStr} 更新）\n\n${staffLines}`
-      }
-    }]
-  });
+        text: `📋 *現在のスタッフ状況*（${nowStr} 更新）\n\n📱 *緊急携帯：${oncall}*\n\n${staffLines}`
+    }
+  }]
+});
   Logger.log("✅ スタッフ状況更新: " + nowStr);
 }
 function testUpdateStatus() {
