@@ -1559,7 +1559,7 @@ STAFF_CONFIG.forEach(staff => {
 
   blocks.push({ type: "divider" });
 });
-   }
+   
 
   callSlackApi("chat.update", {
     channel: TODAY_CHANNEL,
@@ -1567,6 +1567,7 @@ STAFF_CONFIG.forEach(staff => {
     text: `📋 今日のおむすび（${todayDisp}）`,
     blocks
   });
+  }
 
 
 
