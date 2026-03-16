@@ -1632,10 +1632,6 @@ function parseAndWriteSchedule(docId) {
   const res = UrlFetchApp.fetch(url, { headers: { Authorization: "Bearer " + token } });
   const docData = JSON.parse(res.getContentText());
 
-function testParseSchedule() {
-  parseAndWriteSchedule("1MEPQRBCdgi9iZRN18f4pohU52CcZcUSaeBZx9FOxDA0");
-}
-
   // セルテキスト取得ヘルパー
   function getCellText(cell) {
     if (!cell || !cell.content) return "";
@@ -1904,4 +1900,7 @@ function testInitLog() {
   sheet.setFrozenRows(1);
   sheet.appendRow([todayStr, "", "未定", ...STAFF_CONFIG.map(() => "")]);
   Logger.log("✅ 初期化完了");
+}
+function testParseSchedule() {
+  parseAndWriteSchedule("1MEPQRBCdgi9iZRN18f4pohU52CcZcUSaeBZx9FOxDA0");
 }
