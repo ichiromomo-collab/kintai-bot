@@ -1146,41 +1146,18 @@ function postTodayOmusubi() {
   const todayStr  = Utilities.formatDate(today, "Asia/Tokyo", "yyyy/MM/dd");
 
   const blocks = [
-    {
-      type: "header",
-      text: { type: "plain_text", text: `📋 今日のおむすび（${todayDisp}）`, emoji: true }
-    },
+    { type: "header", text: { type: "plain_text", text: `📋 今日のおむすび（${todayDisp}）`, emoji: true } },
     { type: "divider" },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: "📱 *緊急携帯当番を選んでください*" }
-    },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "川畑さん", emoji: true },
-          action_id: "oncall_kawabata",
-          value: "川畑 麻衣子"
-        },
-        {
-          type: "button",
-          text: { type: "plain_text", text: "岩崎さん", emoji: true },
-          action_id: "oncall_iwasaki",
-          value: "岩崎 里沙"
-        }
-      ]
-    },
+    { type: "section", text: { type: "mrkdwn", text: "📱 *緊急携帯当番を選んでください*" } },
+    { type: "actions", elements: [
+      { type: "button", text: { type: "plain_text", text: "川畑さん", emoji: true }, action_id: "oncall_kawabata", value: "川畑 麻衣子" },
+      { type: "button", text: { type: "plain_text", text: "岩崎さん", emoji: true }, action_id: "oncall_iwasaki",  value: "岩崎 里沙" }
+    ]},
     { type: "divider" }
   ];
 
-  // スタッフごとのステータスボタン
   STAFF_CONFIG.forEach(staff => {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス` }
-    });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `👤 *${staff.name}* さんのステータス` } });
 
     let buttons = [];
     if (staff.type === "nurse") {
@@ -1190,50 +1167,54 @@ function postTodayOmusubi() {
         { text: "🚗 移動中",   action_id: "status_moving",      value: staff.name },
         { text: "✅ 空き",     action_id: "status_free",        value: staff.name },
       ];
+      if (staff.name === "岩崎 里沙") {
+        buttons.push(
+          { text: "📞 電話対応中",        action_id: "status_phone",     value: staff.name },
+          { text: "🚨 イレギュラー発生中", action_id: "status_irregular", value: staff.name }
+        );
+      }
     } else if (staff.type === "office") {
       buttons = [
-        { text: "🏢 事務所",   action_id: "status_office",  value: staff.name },
-        { text: "🚗 外出中",   action_id: "status_out",     value: staff.name },
-        { text: "✅ 空き",     action_id: "status_free",    value: staff.name },
+        { text: "🏢 事務所", action_id: "status_office", value: staff.name },
+        { text: "🚗 外出中", action_id: "status_out",    value: staff.name },
+        { text: "✅ 空き",   action_id: "status_free",   value: staff.name },
       ];
     } else if (staff.type === "sales") {
       buttons = [
-        { text: "📊 営業中",   action_id: "status_sales",   value: staff.name },
-        { text: "🏢 事務所",   action_id: "status_office",  value: staff.name },
-        { text: "🚗 外出中",   action_id: "status_out",     value: staff.name },
-        { text: "✅ 空き",     action_id: "status_free",    value: staff.name },
+        { text: "📊 営業中", action_id: "status_sales",  value: staff.name },
+        { text: "🏢 事務所", action_id: "status_office", value: staff.name },
+        { text: "🚗 外出中", action_id: "status_out",    value: staff.name },
+        { text: "✅ 空き",   action_id: "status_free",   value: staff.name },
       ];
     }
 
-    blocks.push({
-      type: "actions",
-      elements: buttons.map(b => ({
-        type: "button",
-        text: { type: "plain_text", text: b.text, emoji: true },
-        action_id: b.action_id + "_" + staff.name.replace(/\s/g, "_"),
-        value: JSON.stringify({ staffName: staff.name, status: b.text })
-      }))
-    });
-
+    // 5個ずつブロックに分割
+    const buttonElements = buttons.map(b => ({
+      type: "button",
+      text: { type: "plain_text", text: b.text, emoji: true },
+      action_id: b.action_id + "_" + staff.name.replace(/\s/g, "_"),
+      value: JSON.stringify({ staffName: staff.name, status: b.text })
+    }));
+    for (let i = 0; i < buttonElements.length; i += 5) {
+      blocks.push({ type: "actions", elements: buttonElements.slice(i, i + 5) });
+    }
     blocks.push({ type: "divider" });
   });
 
-  // tsを保存してステータスシート初期化
   const result = callSlackApi("chat.postMessage", {
     channel: TODAY_CHANNEL,
     text: `📋 今日のおむすび（${todayDisp}）`,
     blocks
   });
-}
 
   if (result?.ok) {
     const ts = result.message?.ts || result.ts || "";
     initOmusubiLog(todayStr, ts);
-    postStatusMessage(); // ← 追加
+    postStatusMessage();
   }
 
   Logger.log("✅ 今日のおむすび投稿完了");
-
+}
 // ===== ステータス・緊急携帯ボタン処理 =====
 function handleTodayStatus(payload) {
   const action  = payload.actions?.[0]?.action_id || "";
