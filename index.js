@@ -183,7 +183,7 @@ function doPost(e) {
 
     // --- 勤怠確認：できてます（残業許可申請済み）---
     if (action === "attendance_overtime_ok") {
-      const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+      const { staffName, dateStr } = JSON.parse((payload.actions?.[0]?.value || "{}").replace(/\+/g, " "));
       callSlackApi("chat.update", {
         channel: payload.channel?.id,
         ts: payload.message?.ts,
@@ -211,7 +211,7 @@ ${dateStr} の勤怠打刻確認済み（残業許可申請済み）` }}]
     }
 
     if (action === "attendance_ok") {
-      const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+      const { staffName, dateStr } = JSON.parse((payload.actions?.[0]?.value || "{}").replace(/\+/g, " "));
       // メッセージを「確認済み」に更新してボタンを消す
       callSlackApi("chat.update", {
         channel: payload.channel?.id,
@@ -230,7 +230,7 @@ ${dateStr} の勤怠打刻を確認しました。` }
 
     // --- 勤怠確認：できてません ---
     if (action === "attendance_ng") {
-      const { staffName, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+      const { staffName, dateStr } = JSON.parse((payload.actions?.[0]?.value || "{}").replace(/\+/g, " "));
       // メッセージを更新してボタンを消す
       callSlackApi("chat.update", {
         channel: payload.channel?.id,
@@ -785,7 +785,7 @@ function sendOvertimeRequest(data, overtimeSheet) {
   Logger.log(`⏰ 残業申請ボタン送信: ${staffName}`);
 }
 function handleAttendanceNG(payload) {
-  const { staffName, staffId, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+  const { staffName, staffId, dateStr } = JSON.parse((payload.actions?.[0]?.value || "{}").replace(/\+/g, " "));
   const presserName = payload.user?.name || payload.user?.username || "unknown";
   const presserUserId = payload.user?.id || "";
 
@@ -854,7 +854,7 @@ function logAttendanceCheck(staffName, dateStr, answer) {
 // ===== 「修正完了」ボタン処理 =====
 function handleAttendanceFixed(payload) {
   try {
-    const { staffName, staffId, dateStr } = JSON.parse(payload.actions?.[0]?.value || "{}");
+    const { staffName, staffId, dateStr } = JSON.parse((payload.actions?.[0]?.value || "{}").replace(/\+/g, " "));
     const approverName = payload.user?.name || payload.user?.username || "管理者";
     const nowStr = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm");
 
